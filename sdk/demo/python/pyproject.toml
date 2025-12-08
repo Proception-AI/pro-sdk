@@ -1,0 +1,31 @@
+[project]
+name = "prohand-demo"
+version = "0.1.0"
+description = "ProHand SDK Demo Examples - cdylib FFI"
+requires-python = ">=3.8"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["prohand_demo", "proglove_demo"]
+package-dir = {"prohand_demo" = "src/prohand_demo", "proglove_demo" = "src/proglove_demo"}
+
+[project.scripts]
+# ProHand demos
+prohand-connect = "prohand_demo.connect:main"
+prohand-ping = "prohand_demo.ping:main"
+prohand-test-hand = "prohand_demo.test_hand:main"
+prohand-cyclic-motion = "prohand_demo.cyclic_motion:main"
+prohand-kapandji = "prohand_demo.kapandji:main"
+# ProGlove demos
+proglove-test-glove = "proglove_demo.test_glove:main"
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.uv.sources]
+# No external dependencies - we load the SDK from relative path
+

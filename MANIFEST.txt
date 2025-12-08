@@ -1,0 +1,39 @@
+ProHand SDK Release
+═══════════════════════════════════════════════════════════════════
+
+Generated: 2025-12-08 08:01:49 UTC
+Build Host: Jack-Work-Station.local
+
+Versions:
+  SDK:      v1.0.0-rc
+  Firmware: v1.0.0-rc
+  App:      v1.0.0-rc
+
+═══════════════════════════════════════════════════════════════════
+
+SDK (unpacked in sdk/):
+  - prohand_sdk/      ProHand SDK (C++, Python)
+  - proglove_sdk/     ProGlove SDK (C++, Python)
+  - demo/             Example applications
+  - docs/             Documentation
+
+Driver Binaries (3 platforms):
+  - prohand-driver-v1.0.0-rc-macos-arm64.tar.gz
+    Size: 4.6M
+    SHA256: 181bdc574e3e12d178d13faf3f644d57a5c51b14605e8e8269d476d5ce52ee30
+  - prohand-driver-v1.0.0-rc-linux-arm64.tar.gz
+    Size: 4.3M
+    SHA256: 14a0c5399cdef84ba37d80128f0acbf176c062e5eb41b36c52937420662d79c3
+  - prohand-driver-v1.0.0-rc-linux-x64.tar.gz
+    Size: 4.6M
+    SHA256: 0da882068a198f16605782fcdaef59a8e5b410e456c29bb252d74f8402d38867
+
+Firmware (OTA binaries):
+  - ProHand-fw-esp-L-v0.3.5-rc-b7af4005-dirty-ota.bin
+    Size: 324K
+    SHA256: 5fe8448ee8dfc441fbf23f97e8925c2d65eb19a2ea28c49ca036dc9f9ded6132
+  - ProHand-fw-esp-R-v0.3.5-rc-b7af4005-dirty-ota.bin
+    Size: 320K
+    SHA256: 995cf396906488c13dc023d28bbe7a3ee3ba2af9b4507e35531a0897faa05fab
+
+macOS Application:

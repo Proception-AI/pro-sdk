@@ -1,0 +1,24 @@
+# ProHand & ProGlove SDK Demo - cdylib FFI approach
+# Demos using the C FFI (dylib) bindings for both hand and glove
+
+# Import sub-justfiles as modules
+mod python "python/justfile"
+mod cpp "cpp/justfile"
+
+# Show all commands
+default:
+    @echo "================================================================"
+    @echo "ProHand & ProGlove SDK Demo - cdylib FFI"
+    @echo "================================================================"
+    @just --list
+    @echo "================================================================"
+    @echo "Module Justfiles:"
+    @echo "================================================================"
+    @echo "Python Demos:  just python <command>"
+    @echo "C++ Demos:     just cpp <command>"
+    @echo "================================================================"
+    @echo "ProGlove (Glove) Demos:"
+    @echo "  just python test-glove   # Monitor tactile sensors"
+    @echo "  just cpp test-glove      # C++ tactile monitor"
+    @echo "================================================================"
+
