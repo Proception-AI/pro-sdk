@@ -1,0 +1,93 @@
+# ProHand SDK Python Demo - cdylib FFI
+
+default:
+    @just --list
+
+# Run connect demo (test IPC connection)
+connect:
+    cd src && python3 -m prohand_demo.connect
+
+# Run ping demo (send ping commands)
+ping *args:
+    cd src && python3 -m prohand_demo.ping {{args}}
+
+# Run test_hand demo (test each joint individually)
+test-hand *args:
+    cd src && python3 -m prohand_demo.test_hand {{args}}
+
+# Run cyclic_motion demo (sine wave motion patterns)
+cyclic-motion *args:
+    cd src && python3 -m prohand_demo.cyclic_motion {{args}}
+
+# Run kapandji demo (opposition test - placeholder)
+kapandji *args:
+    cd src && python3 -m prohand_demo.kapandji {{args}}
+
+# Debug streaming mode connectivity
+debug-streaming *args:
+    cd src && python3 -m prohand_demo.debug_streaming {{args}}
+
+# ProGlove (Glove) Demos
+# Run connect-glove demo: just connect-glove left|right [options] OR just connect-glove --status-endpoint <endpoint>
+connect-glove +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    ARGS=({{args}})
+    FIRST="${ARGS[0]:-}"
+    REST="${ARGS[@]:1}"
+    if [ "$FIRST" = "left" ]; then
+        python3 -m proglove_demo.connect --status-endpoint "ipc:///tmp/proglove-left-status.ipc" $REST
+    elif [ "$FIRST" = "right" ]; then
+        python3 -m proglove_demo.connect --status-endpoint "ipc:///tmp/proglove-right-status.ipc" $REST
+    else
+        python3 -m proglove_demo.connect {{args}}
+    fi
+
+# Run test-glove demo: just test-glove left|right [options] OR just test-glove --status-endpoint <endpoint>
+test-glove +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    ARGS=({{args}})
+    FIRST="${ARGS[0]:-}"
+    REST="${ARGS[@]:1}"
+    if [ "$FIRST" = "left" ]; then
+        python3 -m proglove_demo.test_glove --status-endpoint "ipc:///tmp/proglove-left-status.ipc" $REST
+    elif [ "$FIRST" = "right" ]; then
+        python3 -m proglove_demo.test_glove --status-endpoint "ipc:///tmp/proglove-right-status.ipc" $REST
+    else
+        python3 -m proglove_demo.test_glove {{args}}
+    fi
+
+# Run all basic demos in sequence
+demo-all:
+    @echo "Running all demos..."
+    @echo "\n=== Connection Test ==="
+    just connect
+    @echo "\n=== Ping Test ==="
+    just ping --count 3
+
+# Check Python and SDK availability
+check:
+    @python3 --version
+    @python3 -c "import sys; sys.path.insert(0, '../prohand_sdk/python'); import prohand_sdk; print(f'ProHand SDK: {prohand_sdk.get_version()}')"
+    @python3 -c "import sys; sys.path.insert(0, '../proglove_sdk/python'); import proglove_sdk; print(f'ProGlove SDK: {proglove_sdk.get_version()}')"
+
+# Show help for all demos
+help-all:
+    @echo "=== ProHand Demos ==="
+    @cd src && python3 -m prohand_demo.connect --help
+    @echo "\n=== Ping ==="
+    @cd src && python3 -m prohand_demo.ping --help
+    @echo "\n=== Test Hand ==="
+    @cd src && python3 -m prohand_demo.test_hand --help
+    @echo "\n=== Cyclic Motion ==="
+    @cd src && python3 -m prohand_demo.cyclic_motion --help
+    @echo "\n=== Kapandji ==="
+    @cd src && python3 -m prohand_demo.kapandji --help
+    @echo "\n=== ProGlove Demos ==="
+    @echo "=== Connect Glove ==="
+    @cd src && python3 -m proglove_demo.connect --help
+    @echo "\n=== Test Glove ==="
+    @cd src && python3 -m proglove_demo.test_glove --help
