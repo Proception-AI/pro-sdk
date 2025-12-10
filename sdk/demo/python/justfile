@@ -19,6 +19,14 @@ test-hand *args:
 cyclic-motion *args:
     cd src && python3 -m prohand_demo.cyclic_motion {{args}}
 
+# Run udcap for left hand with IPC defaults
+udcap-left *args:
+    cd src && python3 -m prohand_demo.udcap_ctrl --hand left {{args}}
+
+# Run udcap for right hand with IPC defaults
+udcap-right *args:
+    cd src && python3 -m prohand_demo.udcap_ctrl --hand right {{args}}
+
 # Run kapandji demo (opposition test - placeholder)
 kapandji *args:
     cd src && python3 -m prohand_demo.kapandji {{args}}

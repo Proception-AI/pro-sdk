@@ -1,7 +1,7 @@
 ProHand SDK Release
 ═══════════════════════════════════════════════════════════════════
 
-Generated: 2025-12-09 01:58:48 UTC
+Generated: 2025-12-10 01:56:17 UTC
 Build Host: Jack-Work-Station.local
 
 Versions:
@@ -23,29 +23,29 @@ Driver Binaries (3 platforms):
       * PLATFORM (Size: 4.0K, SHA256: 1cd002503c4599da4fa65e4c4721214b3a5aa12d00be599fea59d8d62178cf45)
       * proglove-headless-ipc-host (Size: 4.1M, SHA256: 521166c22fcacce337b6a693473473563a82af96f8ae3a128198d0898a14f145)
       * prohand-headless-ipc-host (Size: 4.8M, SHA256: a11155bfca9e5221c7a0b545fadaeb8816782c799f8b2dd223a2bd629b43006f)
-      * README.md (Size: 4.0K, SHA256: ce352da854d24ab0ca9b00e4a4b88cee166cb9166b5b0ad458869a5e641390d7)
+      * README.md (Size: 4.0K, SHA256: 2d9064a7c136b58eee98b1d5fea92e9bad4f06ae9531d5096373a8f91272bc36)
       * VERSION (Size: 4.0K, SHA256: 90670554ef3a53186ab2cbf115308bc8e996a1d28f10784ff4353831badca0ca)
   - driver/linux-arm64/ (unpacked)
     Size: 7.7M
       * PLATFORM (Size: 4.0K, SHA256: 9fc0c955f09651be4176e6e07ced8f04c93bc6514f95007c696c66c10a6e0b37)
       * proglove-headless-ipc-host (Size: 3.6M, SHA256: d4027c11d90bc51a31a0642fb8df18351788f5cfdd1144e459a869a9ff933e21)
       * prohand-headless-ipc-host (Size: 4.1M, SHA256: 21192222df32fc4adf170ba2e71b7c860cf39d63ec56379a51ea0f54a0482bee)
-      * README.md (Size: 4.0K, SHA256: 537b73fe45cb84f7e458ae5567bd9169e746d760f60ef1bff4761d1ae7020a0e)
+      * README.md (Size: 4.0K, SHA256: 43e2e0735ed792b12bee38cd085e106423646d1587dfda70b5d1928b4bd310a2)
       * VERSION (Size: 4.0K, SHA256: 90670554ef3a53186ab2cbf115308bc8e996a1d28f10784ff4353831badca0ca)
   - driver/linux-x64/ (unpacked)
     Size: 8.5M
       * PLATFORM (Size: 4.0K, SHA256: 87938196dec73b1222c5b44412529e7f25528a195951191d67455f6a396347b6)
       * proglove-headless-ipc-host (Size: 4.0M, SHA256: 6550e71e1f482d35bf74849cffa317d4716eb66585920f7f46cf06922d05fd4d)
       * prohand-headless-ipc-host (Size: 4.5M, SHA256: d4b018fe7b25a0460ee9e8656a942f696bc1b25a4240b33baa657cd9e83a13ef)
-      * README.md (Size: 4.0K, SHA256: 4a3989e49d02736bcffe32a3bfe4671e528920d953098ae79060b295f349332d)
+      * README.md (Size: 4.0K, SHA256: 1a6ccfcc81686dcb1e43204ef47cb6bb25a11cae08b45828b2a72e3baf92028a)
       * VERSION (Size: 4.0K, SHA256: 90670554ef3a53186ab2cbf115308bc8e996a1d28f10784ff4353831badca0ca)
 
 Firmware (OTA binaries):
-  - ProHand-fw-esp-L-v0.3.5-rc-a73b77e1-dirty-ota.bin
+  - ProHand-fw-esp-L-v0.3.5-rc-a14ce1f2-ota.bin
     Size: 324K
-    SHA256: c7b0876afdb73d4be15a1927a4dfffdea754fcc6fb4640d55bfc246e2a68d406
-  - ProHand-fw-esp-R-v0.3.5-rc-a73b77e1-dirty-ota.bin
+    SHA256: b50f09256edf12abf7a07deb679c614d705170102c095a9148af3e2f56fd5861
+  - ProHand-fw-esp-R-v0.3.5-rc-a14ce1f2-ota.bin
     Size: 320K
-    SHA256: 2e906555d3655f329296c309b82652e3413be6371ae900c7b56180e97fb8ca18
+    SHA256: a21b6c86520012d5a9cc88909d8e5ae6208ca380d13a672d7747f542e2f41c2d
 
 macOS Application:

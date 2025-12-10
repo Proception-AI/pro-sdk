@@ -203,7 +203,29 @@ just cyclic-motion --exclude-wrist
 - `--include-thumb`: Include thumb in motion patterns
 - `--exclude-wrist`: Skip wrist commands
 
-### 5. Kapandji Opposition Test
+### 5. UDCAP → ProHand (UDP Glove Streaming)
+
+Single-hand UDP → ProHand streaming (human-hand mapping only):
+
+```bash
+# Left hand (IPC defaults)
+just udcap-left
+
+# Right hand (IPC defaults)
+just udcap-right
+
+# Custom UDP port / torque / rate
+just udcap-left --udp-port 5556 --torque 0.4 --publish-rate 50
+```
+
+Defaults:
+- Command: `ipc:///tmp/prohand-commands.ipc`
+- Hand streaming: `ipc:///tmp/prohand-hand-streaming.ipc`
+- Wrist streaming: `ipc:///tmp/prohand-wrist-streaming.ipc`
+- UDP: host `0.0.0.0`, port `5555`
+- Torque: `0.3`, publish rate: `60 Hz`
+
+### 6. Kapandji Opposition Test
 
 Runs the Kapandji opposition sequence - thumb touches each fingertip.
 
@@ -218,7 +240,7 @@ just kapandji
 
 ---
 
-### 6. Connection Test (Glove)
+### 7. Connection Test (Glove)
 
 Test IPC/TCP connection to the ProGlove host:
 
@@ -252,7 +274,7 @@ Connection parameters:
 ✅ Connection test completed successfully!
 ```
 
-### 7. Test Glove (Tactile Sensor Monitor)
+### 8. Test Glove (Tactile Sensor Monitor)
 
 Monitor tactile sensor data from the ProGlove in real-time:
 
@@ -304,7 +326,8 @@ python/
     │   ├── test_hand.py        # Individual joint testing
     │   ├── cyclic_motion.py    # Sine wave motion patterns
     │   ├── debug_streaming.py  # Streaming debug utilities
-    │   └── kapandji.py         # Kapandji test (requires PyYAML)
+    │   ├── kapandji.py         # Kapandji test (requires PyYAML)
+    │   └── udcap_ctrl.py       # UDP glove → ProHand streaming demo
     └── proglove_demo/
         ├── __init__.py         # Package init
         ├── utils.py            # Demo utilities

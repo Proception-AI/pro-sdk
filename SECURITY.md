@@ -75,5 +75,5 @@ When using the Proception SDK:
 ---
 
 **Proception Inc.**  
-Updated: 2025-12-08
+Updated: 2025-12-09
 

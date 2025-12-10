@@ -2,7 +2,7 @@
 
 Version: v1.0.0-rc
 Platform: linux-x64
-Build Date: 2025-12-09 01:58:48 UTC
+Build Date: 2025-12-10 01:56:17 UTC
 
 ## Included Binaries
 

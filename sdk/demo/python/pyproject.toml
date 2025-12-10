@@ -20,6 +20,7 @@ prohand-ping = "prohand_demo.ping:main"
 prohand-test-hand = "prohand_demo.test_hand:main"
 prohand-cyclic-motion = "prohand_demo.cyclic_motion:main"
 prohand-kapandji = "prohand_demo.kapandji:main"
+udcap-ctrl = "prohand_demo.udcap_ctrl:main"
 # ProGlove demos
 proglove-test-glove = "proglove_demo.test_glove:main"
 
