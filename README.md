@@ -3,7 +3,7 @@
 Official SDK and drivers for the **ProHand** robotic hand, the **ProGlove**
 tactile sensing glove, and the **ProWristCam**.
 
-**Current Version**: 0.3.0.0
+**Current Version**: 0.3.1.0
 
 The SDK is a C FFI dynamic library (`cdylib`) with ready-to-use **Python**
 (`ctypes`) and **C++** bindings. Your application talks to a small headless
@@ -245,7 +245,7 @@ Versions are tracked with git tags:
 
 ```bash
 git tag -l              # list versions
-git checkout 0.3.0.0    # check out a specific release
+git checkout 0.3.1.0    # check out a specific release
 ```
 
 ## Platform Support

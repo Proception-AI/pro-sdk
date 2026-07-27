@@ -1,13 +1,13 @@
 # ProHand SDK Release Index
 
-**Current Release**: 0.3.0.0
-**Release Date**: 2026-07-22
+**Current Release**: 0.3.1.0
+**Release Date**: 2026-07-27
 
 ## Version Information
 
-- **SDK Version**: 0.3.0.0
+- **SDK Version**: 0.3.1.0
 - **Firmware Version**: 0.9.1.0
-- **macOS App Version**: 0.3.0.0
+- **macOS App Version**: 0.3.1.0
 
 ## Release Contents
 
@@ -37,9 +37,9 @@ The SDK is provided as unpacked source code and libraries, not as a tarball. Thi
 
 #### (Not In this Package) Platform-specific driver binaries packaged as tarballs:
 
-- `prohand-driver-0.3.0.0-macos-arm64.tar.gz` - macOS Apple Silicon
-- `prohand-driver-0.3.0.0-linux-arm64.tar.gz` - Linux ARM64 (Jetson, etc.)
-- `prohand-driver-0.3.0.0-linux-x64.tar.gz` - Linux x64 (Intel/AMD)
+- `prohand-driver-0.3.1.0-macos-arm64.tar.gz` - macOS Apple Silicon
+- `prohand-driver-0.3.1.0-linux-arm64.tar.gz` - Linux ARM64 (Jetson, etc.)
+- `prohand-driver-0.3.1.0-linux-x64.tar.gz` - Linux x64 (Intel/AMD)
 
 **Included in each driver package**:
 
@@ -55,7 +55,7 @@ The SDK is provided as unpacked source code and libraries, not as a tarball. Thi
 
 ### macOS Application (`app/`)
 
-- `ProHand Diagnostic 0.3.0.0.dmg` - Diagnostic and configuration tool
+- `ProHand Diagnostic 0.3.1.0.dmg` - Diagnostic and configuration tool
 
 ## Installation
 
@@ -105,7 +105,7 @@ git tag -l
 To checkout a specific version:
 
 ```bash
-git checkout 0.3.0.0
+git checkout 0.3.1.0
 ```
 
 ## Manifest

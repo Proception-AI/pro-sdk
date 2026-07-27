@@ -1,12 +1,12 @@
 ProHand SDK Release
 ═══════════════════════════════════════════════════════════════════
 
-Generated: 2026-07-23 01:14:11 UTC
+Generated: 2026-07-27 19:17:31 UTC
 
 Versions:
-  SDK:      0.3.0.0
+  SDK:      0.3.1.0
   Firmware: 0.9.1.0
-  App:      0.3.0.0
+  App:      0.3.1.0
 
 ═══════════════════════════════════════════════════════════════════
 
@@ -21,27 +21,27 @@ Driver Binaries (3 platforms):
   - driver/macos-arm64/ (unpacked)
     Size:  21M
       * PLATFORM (Size: 4.0K, SHA256: 1cd002503c4599da4fa65e4c4721214b3a5aa12d00be599fea59d8d62178cf45)
-      * proglove-headless-ipc-host (Size: 4.7M, SHA256: 197bd4be971dfbcc68d149a35a0933ad6ccf3aca51186e817f37957711894630)
-      * prohand-headless-ipc-host (Size: 9.1M, SHA256: 7ceb5db58846649055ee90f75d86735d5e579dfa6cf3baff064eaf6305fad0d4)
+      * proglove-headless-ipc-host (Size: 4.7M, SHA256: 407a3ab176318eaa896625bd3afe063e1c517daefeb83d70c1b365fa771c0de4)
+      * prohand-headless-ipc-host (Size: 9.1M, SHA256: 19ff89dc534cf2e6ddcceb6a49d0a1f088cc116aa7dd7a7092dae47b50e3dc1c)
       * prowristcam-headless-ipc-host (Size: 4.5M, SHA256: 9065ba50f33ed3c9be303146b1cf8bee52d058afbd6a11dee6db89071739cefe)
-      * README.md (Size: 4.0K, SHA256: 078f507538c9ae76293527d3fc1e680b226e16f877814aef30ec53f7d2cddae2)
-      * udcap-ctrl (Size: 3.0M, SHA256: 9d9eac5af54c8593dbe3bb019013624594e6a20e7af878634aaeb6375ec5c342)
-      * VERSION (Size: 4.0K, SHA256: 7c8a548d9aca463da44e208f150b1d9f391f062c1d2e2f1ba0286b0173db896c)
+      * README.md (Size: 4.0K, SHA256: 07c64acacbb6e6fdeb870fd8323056225c1f98b7d7bd7fb0550cdd1d6409d0df)
+      * udcap-ctrl (Size: 3.0M, SHA256: 0d6e97c1369439eb86fdf58f899528c20bbdbb68fcb5a018f4e1369aae33fde2)
+      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
   - driver/linux-arm64/ (unpacked)
     Size:  18M
       * PLATFORM (Size: 4.0K, SHA256: 9fc0c955f09651be4176e6e07ced8f04c93bc6514f95007c696c66c10a6e0b37)
-      * proglove-headless-ipc-host (Size: 3.8M, SHA256: a57a2197bada0e841f0b2f380a05a350f04de4a3bf890d2dd14a37c446e391b9)
-      * prohand-headless-ipc-host (Size: 7.3M, SHA256: 4f0b12510b5e5af4edcc05f9a79d77fde95133db0d12b9bcf3b8aee403ed7f5b)
+      * proglove-headless-ipc-host (Size: 3.8M, SHA256: eca760165180459508c342b0b8e46838addd695fe114fbae9e9b64ec6f970019)
+      * prohand-headless-ipc-host (Size: 7.3M, SHA256: a10223f08113be40b50006b044990b478a0b43a1d45a82b3ec3ed591dd9761fc)
       * prowristcam-headless-ipc-host (Size: 3.9M, SHA256: aebee287f4995c9391ad2d18b394125a7e67b211f15f0ec6d23bc3a5db2c125a)
-      * README.md (Size: 4.0K, SHA256: 8b710604cd4be5d6ff1b2fdf337c6c53873d611c271932b4f73d78f06fc4ddac)
-      * udcap-ctrl (Size: 3.1M, SHA256: 6f401e02b06972adeefe37a97856e7969b4b82164f599ff56f5f271b842d4f76)
-      * VERSION (Size: 4.0K, SHA256: 7c8a548d9aca463da44e208f150b1d9f391f062c1d2e2f1ba0286b0173db896c)
+      * README.md (Size: 4.0K, SHA256: 4fcb5263b1ac1c6cd80b5a0a7a0d3ec0f8f1edb69990969a30de509a8755f6bd)
+      * udcap-ctrl (Size: 3.1M, SHA256: 63997632dbd0c2ebb7f87cda46a0745118d80c13368c21dae48fff90d00bc757)
+      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
   - driver/linux-x64/ (unpacked)
     Size:  20M
       * PLATFORM (Size: 4.0K, SHA256: 87938196dec73b1222c5b44412529e7f25528a195951191d67455f6a396347b6)
-      * proglove-headless-ipc-host (Size: 4.2M, SHA256: c1aae48d302ef43b8570d178d5cbab5c1ef3fdc7b9e1baf082ea1f09ffc2e1e7)
-      * prohand-headless-ipc-host (Size: 8.0M, SHA256: 778b735f6309600bd7b394c5da5b8a82b60b8334dfde36d536351ee4b5c57a35)
+      * proglove-headless-ipc-host (Size: 4.2M, SHA256: b45651494d59a83f77326dcc496f88fa2db3018fc714c93cb0b9edb86c7b6880)
+      * prohand-headless-ipc-host (Size: 8.0M, SHA256: 290b569842a0d89111b0fb72ce56fae8ac7210a64abe05eeacd49e9bddc74a9b)
       * prowristcam-headless-ipc-host (Size: 4.3M, SHA256: ee3b7eca8fcc23677d1f1029b161495d2740419c5aa90dfa5ae4c203f39e37b0)
-      * README.md (Size: 4.0K, SHA256: c587fb8cd7ded0246257d63be4931f8a1cff3176aa60a1199e2b8378111415ac)
-      * udcap-ctrl (Size: 3.4M, SHA256: 553b4727cfa22d9ed3bcb267469da6803960841282c7c2243c25fa6cd07181a2)
-      * VERSION (Size: 4.0K, SHA256: 7c8a548d9aca463da44e208f150b1d9f391f062c1d2e2f1ba0286b0173db896c)
+      * README.md (Size: 4.0K, SHA256: ecc7651a8991c8df96b44744b5eb54bc30b03f1804f7566e5e2d0cadff113f4c)
+      * udcap-ctrl (Size: 3.4M, SHA256: 9a73c5a984dc4e5a8e42414e71d185caa56517335c758a7c20237ee2ada0077c)
+      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
