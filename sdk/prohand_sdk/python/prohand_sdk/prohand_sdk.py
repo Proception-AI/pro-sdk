@@ -53,13 +53,18 @@ import os
 import sys
 from ctypes import (
     POINTER,
+    c_char,
     c_char_p,
     c_int,
     c_float,
     c_short,
     c_bool,
+    c_uint8,
+    c_uint64,
     Structure,
+    byref,
     pointer,
+    string_at,
 )
 from typing import List, Optional
 from dataclasses import dataclass
@@ -146,6 +151,18 @@ class ProHandResult(IntEnum):
     ERROR_OTHER = -99
 
 
+class CalibrationMask(IntEnum):
+    """Finger bitmask values for send_auto_calibration(). OR them together."""
+
+    ABORT = 0b00000
+    THUMB = 0b00001
+    INDEX = 0b00010
+    MIDDLE = 0b00100
+    RING = 0b01000
+    PINKY = 0b10000
+    ALL = 0b11111
+
+
 # ============================================================================
 # STRUCTURES
 # ============================================================================
@@ -160,9 +177,13 @@ class ProHandClientHandle(Structure):
 class ProHandUsbDeviceInfo(Structure):
     """USB device information"""
 
+    # POINTER(c_char), not c_char_p: ctypes converts a c_char_p field to bytes on
+    # read, discarding the original pointer. Freeing that would hand
+    # prohand_free_string a pointer into Python's heap, which aborts the process.
+    # Read these with string_at() and free the pointer itself.
     _fields_ = [
-        ("port_name", c_char_p),
-        ("display_name", c_char_p),
+        ("port_name", POINTER(c_char)),
+        ("display_name", POINTER(c_char)),
     ]
 
 
@@ -212,6 +233,12 @@ _lib.prohand_client_destroy.restype = None
 
 _lib.prohand_client_is_connected.argtypes = [POINTER(ProHandClientHandle)]
 _lib.prohand_client_is_connected.restype = c_int
+
+_lib.prohand_ms_since_last_heartbeat.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(c_uint64),  # out_ms
+]
+_lib.prohand_ms_since_last_heartbeat.restype = c_int
 
 # Commands
 _lib.prohand_send_ping.argtypes = [POINTER(ProHandClientHandle)]
@@ -277,6 +304,7 @@ _lib.prohand_send_hand_command.argtypes = [
     POINTER(ProHandClientHandle),
     POINTER(c_float),  # 20 positions (5 fingers × 4 joints)
     c_float,  # torque
+    c_uint8,  # velocity_saturation (0 = firmware default)
 ]
 _lib.prohand_send_hand_command.restype = c_int
 
@@ -285,6 +313,7 @@ _lib.prohand_send_hand_streams.argtypes = [
     POINTER(ProHandClientHandle),
     POINTER(c_float),  # 20 positions (5 fingers × 4 joints)
     c_float,  # torque
+    c_uint8,  # velocity_saturation (0 = firmware default)
 ]
 _lib.prohand_send_hand_streams.restype = c_int
 
@@ -294,11 +323,20 @@ _lib.prohand_send_zero_calibration.argtypes = [
 ]
 _lib.prohand_send_zero_calibration.restype = c_int
 
+_lib.prohand_send_auto_calibration.argtypes = [
+    POINTER(ProHandClientHandle),
+    c_uint8,  # finger_mask
+]
+_lib.prohand_send_auto_calibration.restype = c_int
+
+_lib.prohand_send_homing.argtypes = [POINTER(ProHandClientHandle), c_int]
+_lib.prohand_send_homing.restype = c_int
+
 # USB discovery
 _lib.prohand_discover_usb_devices.argtypes = [POINTER(ProHandUsbDeviceInfo), c_int]
 _lib.prohand_discover_usb_devices.restype = c_int
 
-_lib.prohand_free_string.argtypes = [c_char_p]
+_lib.prohand_free_string.argtypes = [POINTER(c_char)]
 _lib.prohand_free_string.restype = None
 
 # Status polling
@@ -428,6 +466,31 @@ class ProHandClient:
         if self._closed:
             return False
         return bool(_lib.prohand_client_is_connected(self._handle))
+
+    def ms_since_last_heartbeat(self) -> int:
+        """
+        Milliseconds elapsed since the last status message arrived.
+
+        Finer-grained liveness than is_connected(), which stays True for up to
+        10 seconds after the driver goes silent — this is the value that watchdog
+        reads. Poll it to detect a stalled driver sooner.
+
+        The counter is seeded when the client is created, so it reports a small
+        age before any status has ever arrived. Treat the value as meaningful
+        only after the first successful try_recv_status().
+
+        Returns:
+            Age of the last status message in milliseconds
+
+        Example:
+            if client.ms_since_last_heartbeat() > 500:
+                # Driver has gone quiet — stop commanding motion.
+                ...
+        """
+        out_ms = c_uint64(0)
+        result = _lib.prohand_ms_since_last_heartbeat(self._handle, byref(out_ms))
+        _check_result(result, "ms_since_last_heartbeat")
+        return out_ms.value
 
     # ========================================================================
     # COMMAND METHODS
@@ -664,7 +727,12 @@ class ProHandClient:
         result = _lib.prohand_set_wrist_limits(self._handle, vel, acc, jerk)
         _check_result(result, "set_wrist_limits")
 
-    def send_hand_command(self, positions: List[float], torque: float = 0.45):
+    def send_hand_command(
+        self,
+        positions: List[float],
+        torque: float = 0.45,
+        velocity_saturation: int = 0,
+    ):
         """
         Send hand command via REQ/REP command channel (high-level joint angles, uses inverse kinematics)
 
@@ -678,6 +746,8 @@ class ProHandClient:
             positions: List of 20 floats (5 fingers × 4 joints) in radians
                       Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
             torque: Single torque value (normalized 0.0 to 1.0) applied to all joints
+            velocity_saturation: Global servo velocity cap (0-255) applied to all
+                      fingers. 0 uses the default velocity, resolved by the driver.
 
         Example:
             # All fingers at zero
@@ -693,14 +763,21 @@ class ProHandClient:
             raise InvalidArgumentError(
                 "positions must have 20 elements (5 fingers × 4 joints)"
             )
+        if not 0 <= velocity_saturation <= 255:
+            raise InvalidArgumentError("velocity_saturation must be in 0..=255")
 
         pos_array = (c_float * 20)(*positions)
         result = _lib.prohand_send_hand_command(
-            self._handle, pos_array, c_float(torque)
+            self._handle, pos_array, c_float(torque), c_uint8(velocity_saturation)
         )
         _check_result(result, "send_hand_command")
 
-    def send_hand_streams(self, positions: List[float], torque: float = 0.45):
+    def send_hand_streams(
+        self,
+        positions: List[float],
+        torque: float = 0.45,
+        velocity_saturation: int = 0,
+    ):
         """
         Send hand command via PUB/SUB streaming channel (high-level joint angles, uses inverse kinematics)
 
@@ -714,6 +791,8 @@ class ProHandClient:
             positions: List of 20 floats (5 fingers × 4 joints) in radians
                       Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
             torque: Single torque value (normalized 0.0 to 1.0) applied to all joints
+            velocity_saturation: Global servo velocity cap (0-255) applied to all
+                      fingers. 0 uses the default velocity, resolved by the driver.
 
         Raises:
             ConnectionError: If streaming endpoint was not provided or driver not in streaming mode
@@ -733,10 +812,12 @@ class ProHandClient:
             raise InvalidArgumentError(
                 "positions must have 20 elements (5 fingers × 4 joints)"
             )
+        if not 0 <= velocity_saturation <= 255:
+            raise InvalidArgumentError("velocity_saturation must be in 0..=255")
 
         pos_array = (c_float * 20)(*positions)
         result = _lib.prohand_send_hand_streams(
-            self._handle, pos_array, c_float(torque)
+            self._handle, pos_array, c_float(torque), c_uint8(velocity_saturation)
         )
         _check_result(result, "send_hand_streams")
 
@@ -753,6 +834,42 @@ class ProHandClient:
         mask_array = (c_int * 16)(*[int(b) for b in mask])
         result = _lib.prohand_send_zero_calibration(self._handle, mask_array)
         _check_result(result, "send_zero_calibration")
+
+    def send_auto_calibration(self, finger_mask: int = CalibrationMask.ALL):
+        """
+        Start or abort auto-calibration for the selected fingers
+
+        Drives each selected finger against its hard stops to discover its range.
+        The hand must be unobstructed. Progress is reported on the status channel.
+
+        Args:
+            finger_mask: Bitwise OR of CalibrationMask values.
+                        CalibrationMask.ABORT (0) aborts a running calibration.
+
+        Example:
+            client.send_auto_calibration()  # all fingers
+            client.send_auto_calibration(
+                CalibrationMask.THUMB | CalibrationMask.INDEX
+            )
+            client.send_auto_calibration(CalibrationMask.ABORT)
+        """
+        if not 0 <= finger_mask <= 0b11111:
+            raise InvalidArgumentError(
+                "finger_mask must be a 5-bit CalibrationMask value (0..=0b11111)"
+            )
+
+        result = _lib.prohand_send_auto_calibration(self._handle, c_uint8(finger_mask))
+        _check_result(result, "send_auto_calibration")
+
+    def send_homing(self, enabled: bool = True):
+        """
+        Start or abort the homing sequence
+
+        Args:
+            enabled: True starts homing, False aborts it
+        """
+        result = _lib.prohand_send_homing(self._handle, int(enabled))
+        _check_result(result, "send_homing")
 
     # ========================================================================
     # STATUS POLLING
@@ -811,8 +928,10 @@ def discover_usb_devices(max_devices: int = 10) -> List[UsbDevice]:
         dev = devices_array[i]
         result.append(
             UsbDevice(
-                port_name=dev.port_name.decode("utf-8") if dev.port_name else "",
-                display_name=dev.display_name.decode("utf-8")
+                port_name=string_at(dev.port_name).decode("utf-8")
+                if dev.port_name
+                else "",
+                display_name=string_at(dev.display_name).decode("utf-8")
                 if dev.display_name
                 else "",
             )

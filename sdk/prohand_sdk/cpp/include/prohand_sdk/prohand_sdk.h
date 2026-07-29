@@ -24,11 +24,12 @@
 #ifndef PROHAND_SDK_H
 #define PROHAND_SDK_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
 
 /* ========================================================================== */
 /* TYPES AND STRUCTURES */
@@ -67,9 +68,14 @@ typedef struct {
  */
 typedef struct {
   int is_valid;    /* Whether status data is valid */
-  int status_type; /* Type of status (0=unknown, 1=rotary, 2=linear) */
-  float rotary_positions[16]; /* Rotary positions in radians */
-  float linear_positions[2];  /* Linear positions in radians */
+  int status_type; /* 0=other, 1=rotary status, 2=linear status,
+                      3=rotary target, 4=linear target */
+  /* All positions are raw int16 in centidegrees (0.01 deg per count).
+     Only the array matching status_type is populated on any given read. */
+  int16_t rotary_positions[16]; /* Measured rotary positions */
+  int16_t linear_positions[2];  /* Measured linear positions */
+  int16_t rotary_targets[16];   /* Commanded rotary targets */
+  int16_t linear_targets[2];    /* Commanded linear targets */
 } ProHandStatusInfo;
 
 /* ========================================================================== */
@@ -120,6 +126,31 @@ void prohand_client_destroy(ProHandClientHandle *handle);
  * @return 1 if connected, 0 if not connected
  */
 int prohand_client_is_connected(const ProHandClientHandle *handle);
+
+/**
+ * Milliseconds elapsed since the last status message arrived
+ *
+ * Finer-grained liveness than prohand_client_is_connected(), which stays 1 for
+ * up to 10 seconds after the driver goes silent — this is the value that
+ * watchdog reads. Poll it to detect a stalled driver sooner.
+ *
+ * The counter is seeded when the client is created, so it reports a small age
+ * before any status has ever arrived. Treat the value as meaningful only after
+ * the first successful prohand_try_recv_status().
+ *
+ * @param handle Client handle
+ * @param out_ms Written with the elapsed milliseconds on success
+ * @return PROHAND_SUCCESS on success, error code on failure
+ *
+ * Example:
+ *   uint64_t age_ms;
+ *   if (prohand_ms_since_last_heartbeat(client, &age_ms) == PROHAND_SUCCESS &&
+ *       age_ms > 500) {
+ *       // Driver has gone quiet — stop commanding motion.
+ *   }
+ */
+ProHandResult prohand_ms_since_last_heartbeat(const ProHandClientHandle *handle,
+                                              uint64_t *out_ms);
 
 /* ========================================================================== */
 /* COMMAND FUNCTIONS */
@@ -301,6 +332,8 @@ ProHandResult prohand_set_wrist_limits(const ProHandClientHandle *handle,
  * pinky[16-19]
  * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
  * joints
+ * @param velocity_saturation Global servo velocity cap applied to all fingers.
+ * Pass 0 to use the default velocity; the driver resolves it.
  * @return PROHAND_SUCCESS on success, error code on failure
  *
  * Example:
@@ -309,10 +342,11 @@ ProHandResult prohand_set_wrist_limits(const ProHandClientHandle *handle,
  *                          0.0, 0.0, 0.0, 0.0,  // middle
  *                          0.0, 0.0, 0.0, 0.0,  // ring
  *                          0.0, 0.0, 0.0, 0.0}; // pinky
- *   prohand_send_hand_command(client, positions, 0.45);
+ *   prohand_send_hand_command(client, positions, 0.45, 0);
  */
 ProHandResult prohand_send_hand_command(const ProHandClientHandle *handle,
-                                        const float *positions, float torque);
+                                        const float *positions, float torque,
+                                        uint8_t velocity_saturation);
 
 /**
  * Send hand command via PUB/SUB streaming channel (high-level joint angles,
@@ -331,6 +365,8 @@ ProHandResult prohand_send_hand_command(const ProHandClientHandle *handle,
  * pinky[16-19]
  * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
  * joints
+ * @param velocity_saturation Global servo velocity cap applied to all fingers.
+ * Pass 0 to use the default velocity; the driver resolves it.
  * @return PROHAND_SUCCESS on success,
  *         PROHAND_ERROR_NOT_CONNECTED if streaming not available
  *
@@ -347,11 +383,12 @@ ProHandResult prohand_send_hand_command(const ProHandClientHandle *handle,
  *   // High-frequency loop
  *   for (...) {
  *       float positions[20] = {...};
- *       prohand_send_hand_streams(client, positions, 0.45);
+ *       prohand_send_hand_streams(client, positions, 0.45, 0);
  *   }
  */
 ProHandResult prohand_send_hand_streams(const ProHandClientHandle *handle,
-                                        const float *positions, float torque);
+                                        const float *positions, float torque,
+                                        uint8_t velocity_saturation);
 
 /**
  * Perform zero calibration on selected joints
@@ -369,6 +406,44 @@ ProHandResult prohand_send_hand_streams(const ProHandClientHandle *handle,
  */
 ProHandResult prohand_send_zero_calibration(const ProHandClientHandle *handle,
                                             const int *mask);
+
+/** Finger bitmask values for prohand_send_auto_calibration(). */
+#define PROHAND_CALIB_THUMB 0x01
+#define PROHAND_CALIB_INDEX 0x02
+#define PROHAND_CALIB_MIDDLE 0x04
+#define PROHAND_CALIB_RING 0x08
+#define PROHAND_CALIB_PINKY 0x10
+#define PROHAND_CALIB_ALL 0x1F
+#define PROHAND_CALIB_ABORT 0x00
+
+/**
+ * Start or abort auto-calibration for the selected fingers
+ *
+ * Drives each selected finger against its hard stops to discover its range.
+ * The hand must be unobstructed. Progress is reported on the status channel.
+ *
+ * @param handle Client handle
+ * @param finger_mask Bitwise OR of PROHAND_CALIB_* finger values.
+ * PROHAND_CALIB_ABORT (0) aborts a running calibration.
+ * @return PROHAND_SUCCESS on success, error code on failure
+ *
+ * Example:
+ *   prohand_send_auto_calibration(client, PROHAND_CALIB_ALL);
+ *   prohand_send_auto_calibration(client, PROHAND_CALIB_THUMB |
+ *                                         PROHAND_CALIB_INDEX);
+ */
+ProHandResult prohand_send_auto_calibration(const ProHandClientHandle *handle,
+                                            uint8_t finger_mask);
+
+/**
+ * Start or abort the homing sequence
+ *
+ * @param handle Client handle
+ * @param enabled Non-zero starts homing, zero aborts it
+ * @return PROHAND_SUCCESS on success, error code on failure
+ */
+ProHandResult prohand_send_homing(const ProHandClientHandle *handle,
+                                  int enabled);
 
 /* ========================================================================== */
 /* USB DISCOVERY */

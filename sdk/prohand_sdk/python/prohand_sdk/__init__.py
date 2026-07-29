@@ -1,6 +1,7 @@
 """ProHand SDK - Python Client Library"""
 
 from .prohand_sdk import (
+    CalibrationMask,
     ConnectionError,
     ProHandClient,
     ProHandError,
@@ -9,6 +10,7 @@ from .prohand_sdk import (
 from .prohand_sdk import *  # noqa: F403
 
 __all__ = [
+    "CalibrationMask",
     "ConnectionError",
     "ProHandClient",
     "ProHandError",

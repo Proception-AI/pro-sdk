@@ -1,87 +1,115 @@
 # ProHand SDK Examples
 
-This document provides practical examples for using the ProHand SDK in various programming languages.
+Runnable snippets for the shipped SDKs. The package provides a **C** API
+(`prohand_sdk.h`), a header-only **C++** wrapper (`ProHandClient.hpp`), and a
+**Python** wrapper (`prohand_sdk`). All three are thin bindings over the same
+library, so the concepts map one-to-one.
+
+Every example assumes the IPC host (driver) is already running — see the package
+`README.md`. The driver owns the `/tmp/prohand-*.ipc` sockets these clients
+connect to; nothing works without it.
+
+For complete, tested programs see `sdk/demo/` — `demo/python/src/prohand_demo/`
+and `demo/cpp/src/`. Those are the reference implementations and are kept in sync
+with the library.
 
 ## Table of Contents
 
-1. [Setup and Connection](#setup-and-connection)
-1. [Basic Commands](#basic-commands)
-1. [Hand Control](#hand-control)
-1. [Streaming Mode](#streaming-mode)
-1. [Status Monitoring](#status-monitoring)
-1. [Error Handling](#error-handling)
-1. [Complete Applications](#complete-applications)
+- [Setup and Connection](#setup-and-connection)
+- [Basic Commands](#basic-commands)
+- [Hand Control](#hand-control)
+- [Wrist Control](#wrist-control)
+- [Streaming Mode](#streaming-mode)
+- [Calibration and Homing](#calibration-and-homing)
+- [Status Monitoring](#status-monitoring)
+- [Liveness](#liveness)
+- [Low-Level Actuator Control](#low-level-actuator-control)
+- [Error Handling](#error-handling)
+- [Tips and Best Practices](#tips-and-best-practices)
+- [Troubleshooting](#troubleshooting)
 
 ______________________________________________________________________
 
 ## Setup and Connection
 
-### Rust
-
-```rust
-use prohand_client::{ProHandServiceClient, ProHandPublisher, ProHandSubscriber};
-use std::error::Error;
-
-fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize clients
-    let mut service_client = ProHandServiceClient::new("tcp://localhost:5555");
-    let mut publisher = ProHandPublisher::new("tcp://localhost:5556");
-    let mut subscriber = ProHandSubscriber::new("tcp://localhost:5557");
-
-    // Connect to IPC endpoints
-    service_client.connect()?;
-    publisher.connect()?;
-    subscriber.connect()?;
-
-    println!("Connected to ProHand IPC host");
-
-    Ok(())
-}
-```
+The client takes four endpoints, in this order: command, status, hand streaming,
+wrist streaming.
 
 ### Python
 
 ```python
-import zmq
-from prohand_sdk import ProHandClient
+from prohand_sdk import ProHandClient, get_version, discover_usb_devices
 
-def main():
-    # Create client with default endpoints
-    client = ProHandClient(
-        command_endpoint="tcp://localhost:5555",
-        streaming_endpoint="tcp://localhost:5556",
-        status_endpoint="tcp://localhost:5557"
-    )
+print("SDK version:", get_version())
+for dev in discover_usb_devices():
+    print("found:", dev.port_name, dev.display_name)
 
-    print("Connected to ProHand IPC host")
-    return client
+client = ProHandClient(
+    "ipc:///tmp/prohand-commands.ipc",
+    "ipc:///tmp/prohand-status.ipc",
+    "ipc:///tmp/prohand-hand-streaming.ipc",
+    "ipc:///tmp/prohand-wrist-streaming.ipc",
+)
 
-if __name__ == "__main__":
-    client = main()
+client.send_ping()
+print("connected:", client.is_connected())
+client.close()
+```
+
+`ProHandClient` is also a context manager, which is the preferred form:
+
+```python
+with ProHandClient(cmd, status, hand_stream, wrist_stream) as client:
+    client.send_ping()
 ```
 
 ### C++
 
 ```cpp
-#include "prohand_client.hpp"
+#include <prohand_sdk/ProHandClient.hpp>
 #include <iostream>
 
 int main() {
-    try {
-        // Create clients
-        prohand::ServiceClient service_client("tcp://localhost:5555");
-        prohand::Publisher publisher("tcp://localhost:5556");
-        prohand::Subscriber subscriber("tcp://localhost:5557");
+  using namespace prohand_sdk;
+  ProHandClient client("ipc:///tmp/prohand-commands.ipc",
+                       "ipc:///tmp/prohand-status.ipc",
+                       "ipc:///tmp/prohand-hand-streaming.ipc",
+                       "ipc:///tmp/prohand-wrist-streaming.ipc");
 
-        std::cout << "Connected to ProHand IPC host" << std::endl;
-
-        return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
+  client.sendPing();
+  std::cout << "connected: " << client.isConnected() << "\n";
+  return 0;
 }
 ```
+
+The wrapper is RAII — the handle is released when `client` goes out of scope.
+Failures throw `SdkException`.
+
+### C
+
+```c
+#include <prohand_sdk/prohand_sdk.h>
+#include <stdio.h>
+
+int main(void) {
+  ProHandClientHandle *client = prohand_client_create(
+      "ipc:///tmp/prohand-commands.ipc", "ipc:///tmp/prohand-status.ipc",
+      "ipc:///tmp/prohand-hand-streaming.ipc",
+      "ipc:///tmp/prohand-wrist-streaming.ipc");
+  if (!client) {
+    fprintf(stderr, "failed to create client\n");
+    return 1;
+  }
+
+  prohand_send_ping(client);
+  printf("connected: %d\n", prohand_client_is_connected(client));
+  prohand_client_destroy(client);
+  return 0;
+}
+```
+
+Every C function returns `ProHandResult` (`PROHAND_SUCCESS == 0`) unless
+documented otherwise. Always check it.
 
 ______________________________________________________________________
 
@@ -89,478 +117,343 @@ ______________________________________________________________________
 
 ### Ping
 
-Test connectivity to the IPC host.
-
-**Rust:**
-
-```rust
-// Send ping with 1000ms timeout
-let success = service_client.send_ping(1000)?;
-if success {
-    println!("Ping successful!");
-} else {
-    println!("Ping timeout");
-}
+```python
+client.send_ping()
 ```
 
-**Python:**
+### Enable streaming mode
+
+The driver must be in streaming mode before the streaming channels accept
+commands. `wait_for_streaming_ready()` retries and confirms the device reached the
+Running state.
 
 ```python
-# Send ping
-if client.ping(timeout_ms=1000):
-    print("Ping successful!")
-else:
-    print("Ping timeout")
-```
-
-### Enable Streaming Mode
-
-Enable high-frequency command streaming.
-
-**Rust:**
-
-```rust
-// Enable streaming mode
-let success = service_client.send_streaming_mode(true, 1000)?;
-if success {
-    println!("Streaming mode enabled");
-}
-```
-
-**Python:**
-
-```python
-# Enable streaming mode
-if client.set_streaming_mode(True, timeout_ms=1000):
-    print("Streaming mode enabled")
-```
-
-### Zero Calibration
-
-Calibrate specific servos to zero position.
-
-**Rust:**
-
-```rust
-// Calibrate servo ID 3
-let success = service_client.send_zero_calibration(Some(3), 5000)?;
-
-// Calibrate all servos (pass None)
-let success = service_client.send_zero_calibration(None, 10000)?;
-```
-
-**Python:**
-
-```python
-# Calibrate servo ID 3
-client.send_zero_calibration(motor_id=3, timeout_ms=5000)
-
-# Calibrate all servos
-client.send_zero_calibration(motor_id=None, timeout_ms=10000)
+client.set_streaming_mode(True)
+if not client.wait_for_streaming_ready(timeout=10.0):
+    raise RuntimeError("driver never reached Running state")
 ```
 
 ______________________________________________________________________
 
 ## Hand Control
 
-### High-Level Hand Commands
+Finger poses are **20 joint angles in radians**, ordered
+`thumb[0..3], index[4..7], middle[8..11], ring[12..15], pinky[16..19]`, and each
+finger's four joints are `[Abd, MCP, PIP, DIP]`.
 
-Control fingers using joint angles.
-
-**Rust:**
-
-```rust
-use std::collections::HashMap;
-
-// Create hand pose (angles in radians)
-let mut hand_pose = HashMap::new();
-hand_pose.insert("thumb".to_string(), vec![0.0, 0.5, 0.5, 0.5]);
-hand_pose.insert("index".to_string(), vec![0.0, 1.0, 1.0, 1.0]);
-hand_pose.insert("middle".to_string(), vec![0.0, 1.0, 1.0, 1.0]);
-hand_pose.insert("ring".to_string(), vec![0.0, 0.8, 0.8, 0.8]);
-hand_pose.insert("pinky".to_string(), vec![0.0, 0.8, 0.8, 0.8]);
-hand_pose.insert("wrist".to_string(), vec![0.0, 0.0]); // pitch, yaw
-
-// Send command (angles in radians, 30% torque)
-publisher.send_hand_command(&hand_pose, false, 0.3, None)?;
-```
-
-**Python:**
+Joint space is **anatomical and identical for left and right hands** — positive
+abduction splays a finger toward the thumb on either one. Handedness is resolved
+by the device's actuator wiring, so you send the same numbers regardless of which
+hand is attached.
 
 ```python
-# Create hand pose (angles in radians)
-hand_pose = {
-    "thumb": [0.0, 0.5, 0.5, 0.5],
-    "index": [0.0, 1.0, 1.0, 1.0],
-    "middle": [0.0, 1.0, 1.0, 1.0],
-    "ring": [0.0, 0.8, 0.8, 0.8],
-    "pinky": [0.0, 0.8, 0.8, 0.8],
-    "wrist": [0.0, 0.0],  # pitch, yaw
-}
+import math
 
-# Send command (angles in radians, 30% torque)
-client.send_hand_command(hand_pose, degrees=False, torque_level=0.3)
+positions = [0.0] * 20
+# Curl the index finger: MCP 45 deg, PIP 40 deg, DIP 30 deg.
+positions[5] = math.radians(45.0)
+positions[6] = math.radians(40.0)
+positions[7] = math.radians(30.0)
+
+client.send_hand_command(positions, torque=0.45, velocity_saturation=50)
 ```
 
-**Using Degrees:**
+**`velocity_saturation`** caps servo speed in deg/s for every finger in the
+command. `0` means "use the default", which the driver resolves to 50 deg/s; the
+servo maximum is 110 deg/s.
 
-```rust
-// Same pose in degrees
-hand_pose.insert("index".to_string(), vec![0.0, 57.3, 57.3, 57.3]);
-publisher.send_hand_command(&hand_pose, true, 0.3, None)?; // degrees=true
+It is a *cap*, not a target. A trajectory asking for more travel per unit time
+than the cap allows gets truncated rather than tracked — 80 deg of travel in 0.5 s
+needs 160 deg/s and cannot be followed at any setting. Either lengthen the motion
+or raise the cap.
+
+C++ and C take the same three arguments:
+
+```cpp
+std::vector<float> positions(20, 0.0f);
+positions[5] = 0.785f;                        // index MCP, radians
+client.sendHandCommands(positions, 0.45f, 50);
 ```
+
+```c
+float positions[20] = {0};
+positions[5] = 0.785f;
+prohand_send_hand_command(client, positions, 0.45f, 50);
+```
+
+______________________________________________________________________
+
+## Wrist Control
+
+The wrist is two joints, `[Yaw, Pitch]`, in radians.
 
 ```python
-# Same pose in degrees
-hand_pose["index"] = [0.0, 57.3, 57.3, 57.3]
-client.send_hand_command(hand_pose, degrees=True, torque_level=0.3)
+client.send_wrist_command([math.radians(15.0), 0.0])
 ```
 
-### Low-Level Servo Control
-
-Direct control of individual servos.
-
-**Rust:**
-
-```rust
-// Create rotary commands (position, torque for each servo)
-let positions: Vec<i16> = vec![100, 200, 150, 300, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-let torques: Vec<u16> = vec![50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-
-publisher.send_rotary_command(&positions, &torques)?;
-```
-
-**Python:**
+`use_profiler=True` routes the target through the SDK's motion profiler, which
+smooths it against configured velocity/acceleration/jerk limits. The profiler is
+present only when the library was built with the `motion-profiler` feature;
+`set_wrist_limits` returns `PROHAND_ERROR_UNSUPPORTED` otherwise.
 
 ```python
-# Create rotary commands
-positions = [100, 200, 150, 300] + [0] * 12
-torques = [50, 50, 50, 50] + [0] * 12
-
-client.send_rotary_command(positions, torques)
+client.set_wrist_limits(
+    max_velocity=[1.0, 1.0],        # rad/s
+    max_acceleration=[5.0, 5.0],    # rad/s^2
+    max_jerk=[50.0, 50.0],          # rad/s^3
+)
+client.send_wrist_command([math.radians(15.0), 0.0], use_profiler=True)
 ```
 
 ______________________________________________________________________
 
 ## Streaming Mode
 
-### Continuous Hand Control Loop
-
-**Rust:**
-
-```rust
-use std::time::Duration;
-use std::thread;
-
-// Enable streaming mode first
-service_client.send_streaming_mode(true, 1000)?;
-
-// Streaming loop
-for i in 0..1000 {
-    // Calculate smooth hand motion
-    let angle = (i as f32 * 0.01).sin() * 0.5; // Oscillate 0 to 0.5 rad
-
-    let mut hand_pose = HashMap::new();
-    hand_pose.insert("index".to_string(), vec![0.0, angle, angle, angle]);
-    hand_pose.insert("middle".to_string(), vec![0.0, angle, angle, angle]);
-
-    // Send at ~100Hz
-    publisher.send_hand_command(&hand_pose, false, 0.3, None)?;
-    thread::sleep(Duration::from_millis(10));
-}
-```
-
-**Python:**
+Use the streaming channel for continuous control. It is lower latency than the
+command channel and drops stale frames instead of round-tripping per message, so
+a slow consumer never backs you up.
 
 ```python
 import time
-import math
 
-# Enable streaming mode
 client.set_streaming_mode(True)
+client.wait_for_streaming_ready(timeout=10.0)
 
-# Streaming loop
-for i in range(1000):
-    # Calculate smooth hand motion
-    angle = math.sin(i * 0.01) * 0.5  # Oscillate 0 to 0.5 rad
+positions = [0.0] * 20
+t0 = time.monotonic()
+while time.monotonic() - t0 < 5.0:
+    phase = math.sin((time.monotonic() - t0) * 2.0)
+    for finger in range(1, 5):                     # index..pinky
+        positions[finger * 4 + 1] = math.radians(40.0) * (0.5 + 0.5 * phase)
+    client.send_hand_streams(positions, 0.45, 50)
+    client.send_wrist_streams([0.0, 0.0])
+    time.sleep(0.02)                               # 50 Hz
 
-    hand_pose = {
-        "index": [0.0, angle, angle, angle],
-        "middle": [0.0, angle, angle, angle],
-    }
+client.set_streaming_mode(False)
+```
 
-    # Send at ~100Hz
-    client.send_hand_command(hand_pose, degrees=False, torque_level=0.3)
-    time.sleep(0.01)
+Both channels carry the same joint-space commands and the device runs the
+kinematics either way; only the transport differs.
+
+______________________________________________________________________
+
+## Calibration and Homing
+
+These move the hand. **Keep it clear of obstructions.**
+
+### Zero calibration
+
+Sets the current position of the selected servos as their zero. The mask has 16
+entries, one per servo.
+
+```python
+mask = [False] * 16
+mask[3] = True
+client.send_zero_calibration(mask)
+```
+
+### Auto-calibration
+
+Drives the selected fingers against their hard stops to discover their range.
+Progress is reported on the status channel.
+
+```python
+from prohand_sdk import CalibrationMask
+
+client.send_auto_calibration(CalibrationMask.ALL)
+client.send_auto_calibration(CalibrationMask.THUMB | CalibrationMask.INDEX)
+client.send_auto_calibration(CalibrationMask.ABORT)   # stop a running pass
+```
+
+In C, use the `PROHAND_CALIB_*` macros:
+
+```c
+prohand_send_auto_calibration(client, PROHAND_CALIB_THUMB | PROHAND_CALIB_INDEX);
+prohand_send_auto_calibration(client, PROHAND_CALIB_ABORT);
+```
+
+### Homing
+
+```python
+client.send_homing(True)    # start
+client.send_homing(False)   # abort
 ```
 
 ______________________________________________________________________
 
 ## Status Monitoring
 
-### Receive and Process Status Messages
-
-**Rust:**
-
-```rust
-use prohand_capnp::ProHandStatus;
-
-// Poll for status messages
-loop {
-    match subscriber.try_receive_status()? {
-        Some(status) => {
-            match status {
-                ProHandStatus::Pong => {
-                    println!("Received pong");
-                }
-                ProHandStatus::RotaryGrpStatus(statuses) => {
-                    println!("Servo positions: {:?}",
-                        statuses.iter().map(|s| s.position).collect::<Vec<_>>());
-                }
-                ProHandStatus::HandState(state) => {
-                    println!("Hand state: {:?}", state);
-                }
-                ProHandStatus::HandAlert(error) => {
-                    eprintln!("Hand error: {:?}", error);
-                }
-                _ => {}
-            }
-        }
-        None => {
-            // No message available
-            thread::sleep(Duration::from_millis(1));
-        }
-    }
-}
-```
-
-**Python:**
+`try_recv_status()` is non-blocking and returns `None` when nothing is queued.
 
 ```python
-# Continuously monitor status
-while True:
-    status = client.receive_status(timeout_ms=100)
+status = client.try_recv_status()
+if status is not None and status.is_valid:
+    if status.status_type == 1:
+        print("rotary positions:", status.rotary_positions)
+    elif status.status_type == 2:
+        print("linear positions:", status.linear_positions)
+    elif status.status_type == 3:
+        print("rotary targets:", status.rotary_targets)
+    elif status.status_type == 4:
+        print("linear targets:", status.linear_targets)
+```
 
+`status_type` values: `0` other, `1` rotary status, `2` linear status, `3` rotary
+target echo, `4` linear target echo. Only the array matching `status_type` carries
+fresh data on a given read.
+
+**Units.** Positions are raw `int16` in centidegrees (0.01 deg per count), so
+divide by 100 for degrees. The C++ wrapper converts to radians for you and exposes
+`rotaryPositions`, `linearPositions`, `rotaryTargets`, `linearTargets`.
+
+Poll in a loop rather than once — status arrives at up to 200 Hz, and a single call
+sees only what is currently queued.
+
+```python
+import time
+
+deadline = time.monotonic() + 2.0
+while time.monotonic() < deadline:
+    status = client.try_recv_status()
     if status is None:
+        time.sleep(0.005)
         continue
+    if status.status_type == 1:
+        degrees = [p / 100.0 for p in status.rotary_positions]
+        print(degrees[:4])
+```
 
-    if status['type'] == 'pong':
-        print("Received pong")
-    elif status['type'] == 'rotary_group_status':
-        positions = [s['position'] for s in status['servos']]
-        print(f"Servo positions: {positions}")
-    elif status['type'] == 'hand_state':
-        print(f"Hand state: {status['state']}")
-    elif status['type'] == 'hand_alert':
-        print(f"Hand error: {status['error']}")
+______________________________________________________________________
+
+## Liveness
+
+`is_connected()` stays true for up to 10 seconds after the driver goes quiet,
+which is too coarse for a control loop. `ms_since_last_heartbeat()` reports the age
+of the last status message instead.
+
+```python
+if client.ms_since_last_heartbeat() > 500:
+    # Driver has gone silent — stop commanding motion.
+    client.set_streaming_mode(False)
+```
+
+The counter is seeded when the client is created, so treat it as meaningful only
+after the first successful `try_recv_status()`.
+
+______________________________________________________________________
+
+## Low-Level Actuator Control
+
+Prefer joint-space commands. The device converts them using its own wiring map,
+which is the only place that knows the hand's handedness and hardware variant.
+Actuator-space commands bypass that, making **you** responsible for the mapping —
+and a map that does not match the attached hand drives the wrong tendons.
+
+Use these only for servo-level bring-up and diagnostics.
+
+```python
+positions = [0.0] * 16          # radians, indexed by servo bus ID
+torques = [0.3] * 16            # normalized 0.0 - 1.0
+client.send_rotary_commands(positions, torques)
+
+client.send_linear_commands([0.0, 0.0], [0.3, 0.3])   # 2 linear actuators
 ```
 
 ______________________________________________________________________
 
 ## Error Handling
 
-### Robust Connection with Retry
+Python raises on failure; the hierarchy is `ProHandError` with `ConnectionError`
+and `InvalidArgumentError` subclasses.
 
-**Rust:**
+```python
+from prohand_sdk import ProHandError, ConnectionError, InvalidArgumentError
 
-```rust
-fn connect_with_retry(max_retries: usize) -> Result<ProHandServiceClient, Box<dyn Error>> {
-    let mut client = ProHandServiceClient::new("tcp://localhost:5555");
-
-    for attempt in 1..=max_retries {
-        match client.connect() {
-            Ok(()) => {
-                println!("Connected successfully");
-                return Ok(client);
-            }
-            Err(e) => {
-                eprintln!("Connection attempt {} failed: {}", attempt, e);
-                if attempt < max_retries {
-                    thread::sleep(Duration::from_secs(2));
-                }
-            }
-        }
-    }
-
-    Err("Failed to connect after retries".into())
-}
+try:
+    client.send_hand_command(positions, 0.45, 50)
+except InvalidArgumentError as e:
+    print("bad arguments:", e)          # wrong list length, velocity > 255
+except ConnectionError as e:
+    print("not connected:", e)
+except ProHandError as e:
+    print("sdk error:", e)
 ```
 
-**Python:**
+C++ throws `SdkException`. C returns `ProHandResult`:
+
+| Code | Meaning |
+|---|---|
+| `PROHAND_SUCCESS` | success (0) |
+| `PROHAND_ERROR_NULL` | null handle or argument |
+| `PROHAND_ERROR_CONNECTION` | transport failure |
+| `PROHAND_ERROR_INVALID_ARGUMENT` | bad argument |
+| `PROHAND_ERROR_NOT_CONNECTED` | streaming not available |
+| `PROHAND_ERROR_UNSUPPORTED` | feature absent from this build |
+| `PROHAND_ERROR_OTHER` | unspecified |
+
+### Retrying a connection
 
 ```python
 import time
 
-def connect_with_retry(max_retries=5):
-    for attempt in range(1, max_retries + 1):
+def connect(retries=5, delay=1.0):
+    for attempt in range(retries):
         try:
-            client = ProHandClient(
-                command_endpoint="tcp://localhost:5555",
-                streaming_endpoint="tcp://localhost:5556",
-                status_endpoint="tcp://localhost:5557"
-            )
-            print("Connected successfully")
+            client = ProHandClient(cmd, status, hand_stream, wrist_stream)
+            client.send_ping()
             return client
-        except Exception as e:
-            print(f"Connection attempt {attempt} failed: {e}")
-            if attempt < max_retries:
-                time.sleep(2)
-
-    raise Exception("Failed to connect after retries")
+        except ProHandError as e:
+            print(f"attempt {attempt + 1} failed: {e}")
+            time.sleep(delay)
+    raise RuntimeError("could not connect to the IPC host")
 ```
 
-______________________________________________________________________
-
-## Complete Applications
-
-### Example: Gesture Player
-
-Play back pre-recorded hand gestures.
-
-**Rust:**
-
-```rust
-use prohand_client::{ProHandServiceClient, ProHandPublisher};
-use std::collections::HashMap;
-use std::time::Duration;
-use std::thread;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Connect
-    let mut service = ProHandServiceClient::new("tcp://localhost:5555");
-    service.connect()?;
-
-    let mut publisher = ProHandPublisher::new("tcp://localhost:5556");
-    publisher.connect()?;
-
-    // Enable streaming
-    service.send_streaming_mode(true, 1000)?;
-
-    // Define gestures
-    let open_hand: HashMap<String, Vec<f32>> = [
-        ("thumb", vec![0.0, 0.0, 0.0, 0.0]),
-        ("index", vec![0.0, 0.0, 0.0, 0.0]),
-        ("middle", vec![0.0, 0.0, 0.0, 0.0]),
-        ("ring", vec![0.0, 0.0, 0.0, 0.0]),
-        ("pinky", vec![0.0, 0.0, 0.0, 0.0]),
-    ].iter().cloned().map(|(k, v)| (k.to_string(), v)).collect();
-
-    let closed_hand: HashMap<String, Vec<f32>> = [
-        ("thumb", vec![0.0, 1.2, 1.2, 1.2]),
-        ("index", vec![0.0, 1.5, 1.5, 1.5]),
-        ("middle", vec![0.0, 1.5, 1.5, 1.5]),
-        ("ring", vec![0.0, 1.5, 1.5, 1.5]),
-        ("pinky", vec![0.0, 1.5, 1.5, 1.5]),
-    ].iter().cloned().map(|(k, v)| (k.to_string(), v)).collect();
-
-    // Play gesture sequence
-    loop {
-        // Open hand
-        println!("Opening hand...");
-        for _ in 0..100 {
-            publisher.send_hand_command(&open_hand, false, 0.3, None)?;
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        thread::sleep(Duration::from_secs(1));
-
-        // Close hand
-        println!("Closing hand...");
-        for _ in 0..100 {
-            publisher.send_hand_command(&closed_hand, false, 0.5, None)?;
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        thread::sleep(Duration::from_secs(1));
-    }
-}
-```
-
-### Example: Teleoperation
-
-Mirror input device to ProHand.
-
-**Python:**
-
-```python
-import time
-from prohand_sdk import ProHandClient
-
-def map_input_to_hand(input_data):
-    """Map your input device data to hand pose"""
-    # Implement your mapping logic here
-    # This is a placeholder
-    return {
-        "thumb": input_data.get("thumb", [0.0] * 4),
-        "index": input_data.get("index", [0.0] * 4),
-        "middle": input_data.get("middle", [0.0] * 4),
-        "ring": input_data.get("ring", [0.0] * 4),
-        "pinky": input_data.get("pinky", [0.0] * 4),
-    }
-
-def main():
-    # Connect
-    client = ProHandClient(
-        command_endpoint="tcp://localhost:5555",
-        streaming_endpoint="tcp://localhost:5556",
-        status_endpoint="tcp://localhost:5557"
-    )
-
-    # Enable streaming
-    client.set_streaming_mode(True)
-
-    print("Starting teleoperation...")
-
-    while True:
-        # Read from your input device
-        # input_data = read_input_device()
-        input_data = {}  # Placeholder
-
-        # Map to hand pose
-        hand_pose = map_input_to_hand(input_data)
-
-        # Send command
-        client.send_hand_command(hand_pose, degrees=False, torque_level=0.3)
-
-        # Maintain loop rate
-        time.sleep(0.01)  # 100 Hz
-
-if __name__ == "__main__":
-    main()
-```
+Note that creating a client succeeds even with no driver running — the transport
+connects lazily. Send a ping and check `is_connected()` to confirm a live link.
 
 ______________________________________________________________________
 
 ## Tips and Best Practices
 
-1. **Always enable streaming mode** before sending high-frequency commands
-1. **Monitor status messages** to detect errors early
-1. **Use appropriate torque limits** to protect hardware (typically 0.2-0.5)
-1. **Implement graceful shutdown** to return hand to safe position
-1. **Handle disconnections** with automatic reconnection logic
-1. **Limit command rate** to reasonable frequencies (50-200 Hz)
-1. **Test with low torque** when developing new behaviors
-
-## Troubleshooting
-
-### Connection Issues
-
-- Ensure IPC host is running
-- Check endpoint addresses match
-- Verify no firewall blocking ports
-
-### Commands Not Executed
-
-- Verify streaming mode is enabled
-- Check device is connected
-- Monitor status for error messages
-
-### Poor Performance
-
-- Reduce command frequency
-- Check CPU usage on IPC host
-- Verify USB connection quality
+- Send joint-space commands and let the device do the kinematics.
+- Pass a non-zero `velocity_saturation` when speed matters; `0` works but means
+  "whatever the default is".
+- Size motion to the servo envelope: 50 deg/s default, 110 deg/s maximum.
+- Stream at a steady rate (50 Hz is a good default) rather than in bursts.
+- Poll status in a loop; one `try_recv_status()` sees only what is queued.
+- Watch `ms_since_last_heartbeat()` in any loop that commands motion.
+- Close the client explicitly, or use the context manager.
 
 ______________________________________________________________________
 
-For more information, see [API.md](API.md) for complete API reference.
+## Troubleshooting
+
+### Nothing moves, but every call returns success
+
+Usually the driver is not actually talking to a hand, or streaming mode was never
+enabled. Check, in order:
+
+1. Is the driver running, and did it claim the USB device? A second driver holding
+   the device makes the first fail with an access error while its sockets still
+   bind — so a client connects happily to a driver with no hand behind it.
+2. Do your endpoints match the driver's? A driver started with a node prefix binds
+   e.g. `/tmp/right-commands.ipc`, not `/tmp/prohand-commands.ipc`.
+3. Did `wait_for_streaming_ready()` return `True`?
+4. Is the motion inside the servo envelope? See `velocity_saturation` above.
+
+### Connection issues
+
+- Confirm the socket files exist for the endpoints you passed.
+- Remove stale socket files left behind by a driver that was killed.
+- For TCP endpoints, confirm host, port and firewall.
+
+### Poor tracking or jerky motion
+
+Usually a velocity cap too low for the commanded trajectory, or an irregular send
+rate. Raise `velocity_saturation`, lengthen the motion, or stabilise your loop
+period.
+
+______________________________________________________________________
+
+For the message-level protocol see [API.md](API.md). For complete working programs
+see `sdk/demo/`.

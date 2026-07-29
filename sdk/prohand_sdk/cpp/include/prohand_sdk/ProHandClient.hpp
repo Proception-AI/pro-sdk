@@ -7,6 +7,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <optional>
 #include <prohand_sdk/prohand_sdk.h>
 #include <stdexcept>
@@ -38,9 +39,14 @@ struct UsbDevice {
  */
 struct HandStatus {
   bool isValid;
-  int statusType;                     // 0=unknown, 1=rotary, 2=linear
-  std::vector<float> rotaryPositions; // Radians [16]
-  std::vector<float> linearPositions; // Radians [2]
+  // 0=other, 1=rotary status, 2=linear status, 3=rotary target, 4=linear target
+  int statusType;
+  // Converted to radians from the raw centidegrees the C API reports. Only the
+  // vector matching statusType carries fresh data on any given read.
+  std::vector<float> rotaryPositions; // [16]
+  std::vector<float> linearPositions; // [2]
+  std::vector<float> rotaryTargets;   // [16]
+  std::vector<float> linearTargets;   // [2]
 };
 
 /**
@@ -143,6 +149,22 @@ public:
     if (!handle_)
       return false;
     return prohand_client_is_connected(handle_) != 0;
+  }
+
+  /**
+   * Milliseconds elapsed since the last status message arrived
+   *
+   * Finer-grained liveness than isConnected(), which stays true for up to 10
+   * seconds after the driver goes silent. The counter is seeded at
+   * construction, so treat the value as meaningful only after the first
+   * tryRecvStatus().
+   */
+  uint64_t msSinceLastHeartbeat() const {
+    checkHandle();
+    uint64_t ms = 0;
+    auto result = prohand_ms_since_last_heartbeat(handle_, &ms);
+    checkResult(result, "msSinceLastHeartbeat");
+    return ms;
   }
 
   /**
@@ -403,9 +425,12 @@ public:
    * pinky[16-19]
    * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
    * joints
+   * @param velocitySaturation Global servo velocity cap applied to all fingers.
+   * Pass 0 to use the default velocity; the driver resolves it.
    * @throws SdkException on error
    */
-  void sendHandCommands(const std::vector<float> &positions, float torque) {
+  void sendHandCommands(const std::vector<float> &positions, float torque,
+                        uint8_t velocitySaturation = 0) {
     checkHandle();
 
     if (positions.size() != 20) {
@@ -413,7 +438,8 @@ public:
           "positions must have 20 elements (5 fingers × 4 joints)");
     }
 
-    auto result = prohand_send_hand_command(handle_, positions.data(), torque);
+    auto result = prohand_send_hand_command(handle_, positions.data(), torque,
+                                            velocitySaturation);
     checkResult(result, "sendHandCommands");
   }
 
@@ -434,10 +460,13 @@ public:
    * pinky[16-19]
    * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
    * joints
+   * @param velocitySaturation Global servo velocity cap applied to all fingers.
+   * Pass 0 to use the default velocity; the driver resolves it.
    * @throws SdkException if streaming not available or driver not in streaming
    * mode
    */
-  void sendHandStreams(const std::vector<float> &positions, float torque) {
+  void sendHandStreams(const std::vector<float> &positions, float torque,
+                       uint8_t velocitySaturation = 0) {
     checkHandle();
 
     if (positions.size() != 20) {
@@ -445,7 +474,8 @@ public:
           "positions must have 20 elements (5 fingers × 4 joints)");
     }
 
-    auto result = prohand_send_hand_streams(handle_, positions.data(), torque);
+    auto result = prohand_send_hand_streams(handle_, positions.data(), torque,
+                                            velocitySaturation);
     checkResult(result, "sendHandStreams");
   }
 
@@ -471,6 +501,32 @@ public:
   }
 
   /**
+   * Start or abort auto-calibration for the selected fingers
+   *
+   * Drives each selected finger against its hard stops to discover its range.
+   * The hand must be unobstructed. Progress is reported on the status channel.
+   *
+   * @param fingerMask Bitwise OR of PROHAND_CALIB_* values.
+   * PROHAND_CALIB_ABORT (0) aborts a running calibration.
+   */
+  void sendAutoCalibration(uint8_t fingerMask = PROHAND_CALIB_ALL) {
+    checkHandle();
+    auto result = prohand_send_auto_calibration(handle_, fingerMask);
+    checkResult(result, "sendAutoCalibration");
+  }
+
+  /**
+   * Start or abort the homing sequence
+   *
+   * @param enabled true starts homing, false aborts it
+   */
+  void sendHoming(bool enabled = true) {
+    checkHandle();
+    auto result = prohand_send_homing(handle_, enabled ? 1 : 0);
+    checkResult(result, "sendHoming");
+  }
+
+  /**
    * Try to receive status (non-blocking)
    *
    * @return HandStatus if available, nullopt otherwise
@@ -485,10 +541,10 @@ public:
       HandStatus status;
       status.isValid = statusInfo.is_valid != 0;
       status.statusType = statusInfo.status_type;
-      status.rotaryPositions.assign(statusInfo.rotary_positions,
-                                    statusInfo.rotary_positions + 16);
-      status.linearPositions.assign(statusInfo.linear_positions,
-                                    statusInfo.linear_positions + 2);
+      status.rotaryPositions = toRadians(statusInfo.rotary_positions, 16);
+      status.linearPositions = toRadians(statusInfo.linear_positions, 2);
+      status.rotaryTargets = toRadians(statusInfo.rotary_targets, 16);
+      status.linearTargets = toRadians(statusInfo.linear_targets, 2);
       return status;
     } else if (result == 0) {
       return std::nullopt;
@@ -535,6 +591,16 @@ public:
   }
 
 private:
+  /// Raw int16 centidegrees (0.01 deg per count) -> radians.
+  static std::vector<float> toRadians(const int16_t *raw, size_t count) {
+    constexpr float kCentidegToRad = 3.14159265358979323846f / 18000.0f;
+    std::vector<float> out(count);
+    for (size_t i = 0; i < count; ++i) {
+      out[i] = static_cast<float>(raw[i]) * kCentidegToRad;
+    }
+    return out;
+  }
+
   void checkHandle() const {
     if (!handle_) {
       throw SdkException("Client handle is null");

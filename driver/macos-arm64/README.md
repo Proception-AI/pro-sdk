@@ -1,8 +1,8 @@
 # ProHand Driver Binaries - macos-arm64
 
-Version: 0.3.1.0
+Version: 0.3.3.0
 Platform: macos-arm64
-Build Date: 2026-07-27 19:17:31 UTC
+Build Date: 2026-07-29 00:48:03 UTC
 
 ## Included Binaries
 

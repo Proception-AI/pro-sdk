@@ -1,12 +1,12 @@
 ProHand SDK Release
 ═══════════════════════════════════════════════════════════════════
 
-Generated: 2026-07-27 19:17:31 UTC
+Generated: 2026-07-29 00:48:04 UTC
 
 Versions:
-  SDK:      0.3.1.0
+  SDK:      0.3.3.0
   Firmware: 0.9.1.0
-  App:      0.3.1.0
+  App:      0.3.3.0
 
 ═══════════════════════════════════════════════════════════════════
 
@@ -22,26 +22,26 @@ Driver Binaries (3 platforms):
     Size:  21M
       * PLATFORM (Size: 4.0K, SHA256: 1cd002503c4599da4fa65e4c4721214b3a5aa12d00be599fea59d8d62178cf45)
       * proglove-headless-ipc-host (Size: 4.7M, SHA256: 407a3ab176318eaa896625bd3afe063e1c517daefeb83d70c1b365fa771c0de4)
-      * prohand-headless-ipc-host (Size: 9.1M, SHA256: 19ff89dc534cf2e6ddcceb6a49d0a1f088cc116aa7dd7a7092dae47b50e3dc1c)
+      * prohand-headless-ipc-host (Size: 9.1M, SHA256: b331ae24d6e3f30d62d580b07acd3cf072d62824dbc29f46f6a1324bf3eb68f9)
       * prowristcam-headless-ipc-host (Size: 4.5M, SHA256: 9065ba50f33ed3c9be303146b1cf8bee52d058afbd6a11dee6db89071739cefe)
-      * README.md (Size: 4.0K, SHA256: 07c64acacbb6e6fdeb870fd8323056225c1f98b7d7bd7fb0550cdd1d6409d0df)
+      * README.md (Size: 4.0K, SHA256: 3108c057e0b210188e51e8c1b2ad7f0d069dc03c1d302d01500c6a161fcca3e1)
       * udcap-ctrl (Size: 3.0M, SHA256: 0d6e97c1369439eb86fdf58f899528c20bbdbb68fcb5a018f4e1369aae33fde2)
-      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
+      * VERSION (Size: 4.0K, SHA256: 217e1a6b730228879259b3819bc7a743b9678a9df3e664da816bc265890ba979)
   - driver/linux-arm64/ (unpacked)
     Size:  18M
       * PLATFORM (Size: 4.0K, SHA256: 9fc0c955f09651be4176e6e07ced8f04c93bc6514f95007c696c66c10a6e0b37)
       * proglove-headless-ipc-host (Size: 3.8M, SHA256: eca760165180459508c342b0b8e46838addd695fe114fbae9e9b64ec6f970019)
-      * prohand-headless-ipc-host (Size: 7.3M, SHA256: a10223f08113be40b50006b044990b478a0b43a1d45a82b3ec3ed591dd9761fc)
+      * prohand-headless-ipc-host (Size: 7.3M, SHA256: 32650a3c4628acdedb3cdf8a3e506ee76429c9d7684e09d3c2d6765635ed1178)
       * prowristcam-headless-ipc-host (Size: 3.9M, SHA256: aebee287f4995c9391ad2d18b394125a7e67b211f15f0ec6d23bc3a5db2c125a)
-      * README.md (Size: 4.0K, SHA256: 4fcb5263b1ac1c6cd80b5a0a7a0d3ec0f8f1edb69990969a30de509a8755f6bd)
+      * README.md (Size: 4.0K, SHA256: 1f4f9b2266779c3da79de109fc49b4599ad8a13df32bb393c8823993291bb355)
       * udcap-ctrl (Size: 3.1M, SHA256: 63997632dbd0c2ebb7f87cda46a0745118d80c13368c21dae48fff90d00bc757)
-      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
+      * VERSION (Size: 4.0K, SHA256: 217e1a6b730228879259b3819bc7a743b9678a9df3e664da816bc265890ba979)
   - driver/linux-x64/ (unpacked)
     Size:  20M
       * PLATFORM (Size: 4.0K, SHA256: 87938196dec73b1222c5b44412529e7f25528a195951191d67455f6a396347b6)
       * proglove-headless-ipc-host (Size: 4.2M, SHA256: b45651494d59a83f77326dcc496f88fa2db3018fc714c93cb0b9edb86c7b6880)
-      * prohand-headless-ipc-host (Size: 8.0M, SHA256: 290b569842a0d89111b0fb72ce56fae8ac7210a64abe05eeacd49e9bddc74a9b)
+      * prohand-headless-ipc-host (Size: 8.0M, SHA256: bc4d3b3eace9e1e4b4675fc3866ac372c11e75b31d242a9486435d565323b0a5)
       * prowristcam-headless-ipc-host (Size: 4.3M, SHA256: ee3b7eca8fcc23677d1f1029b161495d2740419c5aa90dfa5ae4c203f39e37b0)
-      * README.md (Size: 4.0K, SHA256: ecc7651a8991c8df96b44744b5eb54bc30b03f1804f7566e5e2d0cadff113f4c)
+      * README.md (Size: 4.0K, SHA256: 20446aa77936015dffa2d4137faebbae83c65ec4cec7f378a6e0bca97a2917a6)
       * udcap-ctrl (Size: 3.4M, SHA256: 9a73c5a984dc4e5a8e42414e71d185caa56517335c758a7c20237ee2ada0077c)
-      * VERSION (Size: 4.0K, SHA256: 18c1677bdf702687b8fabc9243ad6cdd55dc672274676e3ed7cf9f4987f83b2c)
+      * VERSION (Size: 4.0K, SHA256: 217e1a6b730228879259b3819bc7a743b9678a9df3e664da816bc265890ba979)

@@ -80,31 +80,32 @@ pip install -e .
 Example usage:
 
 ```python
+import math
 from prohand_sdk import ProHandClient
 
-# Connect to the IPC host
-client = ProHandClient()
-client.connect()
+# The four endpoints are positional: command, status, hand streaming, wrist streaming.
+with ProHandClient(
+    "ipc:///tmp/prohand-commands.ipc",
+    "ipc:///tmp/prohand-status.ipc",
+    "ipc:///tmp/prohand-hand-streaming.ipc",
+    "ipc:///tmp/prohand-wrist-streaming.ipc",
+) as client:
+    client.send_ping()
 
-# Send a ping
-client.ping()
+    client.set_streaming_mode(True)
+    client.wait_for_streaming_ready(timeout=10.0)
 
-# Enable streaming mode
-client.set_streaming_mode(True)
+    # 20 joint angles in radians: thumb[0..3], index[4..7], middle[8..11],
+    # ring[12..15], pinky[16..19]; each finger is [Abd, MCP, PIP, DIP].
+    positions = [0.0] * 20
+    for finger in range(1, 5):                 # index..pinky
+        positions[finger * 4 + 1] = math.radians(45.0)   # MCP
+    client.send_hand_command(positions, torque=0.45, velocity_saturation=50)
 
-# Send hand command (joint angles in radians)
-hand_pose = {
-    "thumb": [0.0, 0.5, 0.5, 0.5],
-    "index": [0.0, 1.0, 1.0, 1.0],
-    "middle": [0.0, 1.0, 1.0, 1.0],
-    "ring": [0.0, 0.8, 0.8, 0.8],
-    "pinky": [0.0, 0.8, 0.8, 0.8],
-}
-client.send_hand_command(hand_pose)
-
-# Receive status
-status = client.receive_status()
-print(f"Hand status: {status}")
+    status = client.try_recv_status()
+    if status is not None and status.status_type == 1:
+        # Raw int16 centidegrees — divide by 100 for degrees.
+        print("rotary positions:", [p / 100.0 for p in status.rotary_positions])
 ```
 
 #### ProGlove SDK
@@ -165,26 +166,33 @@ Example usage:
 
 ```cpp
 #include <prohand_sdk/ProHandClient.hpp>
+#include <iostream>
+#include <vector>
 
 int main() {
-    ProHandClient client;
-    client.connect();
+    using namespace prohand_sdk;
 
-    // Send ping
-    client.ping();
+    // Positional endpoints: command, status, hand streaming, wrist streaming.
+    ProHandClient client("ipc:///tmp/prohand-commands.ipc",
+                         "ipc:///tmp/prohand-status.ipc",
+                         "ipc:///tmp/prohand-hand-streaming.ipc",
+                         "ipc:///tmp/prohand-wrist-streaming.ipc");
 
-    // Enable streaming
+    client.sendPing();
     client.setStreamingMode(true);
+    client.waitForStreamingReady(10.0);
 
-    // Send hand command
-    HandPose pose;
-    pose.thumb = {0.0, 0.5, 0.5, 0.5};
-    pose.index = {0.0, 1.0, 1.0, 1.0};
-    client.sendHandCommand(pose);
+    // 20 joint angles in radians, [Abd, MCP, PIP, DIP] per finger.
+    std::vector<float> positions(20, 0.0f);
+    for (int finger = 1; finger < 5; ++finger) {
+        positions[finger * 4 + 1] = 0.785f;   // MCP, ~45 deg
+    }
+    client.sendHandCommands(positions, 0.45f, 50);
 
-    // Receive status
-    auto status = client.receiveStatus();
-
+    if (auto status = client.tryRecvStatus()) {
+        // The C++ wrapper converts to radians for you.
+        std::cout << "rotary[0]: " << status->rotaryPositions[0] << " rad\n";
+    }
     return 0;
 }
 ```
@@ -229,47 +237,52 @@ int main() {
 }
 ```
 
-#### ProHand Cap'n Proto Rust SDK
-
-A native, zero-copy Rust client (`prohand-client`) — an alternative to the FFI
-SDKs above, speaking Cap'n Proto over ZMQ directly. Shipped as self-contained
-source: the crate bundles its schemas and compiles them via `build.rs`.
-
-```bash
-cd prohand_capnp_sdk
-cargo build --release
-```
-
-```toml
-# Add it to your project (path shown; git / crates.io once published):
-[dependencies]
-prohand-client = { path = "path/to/prohand_capnp_sdk" }
-```
-
-```rust
-use prohand_client::{ProHandServiceClient, ProHandPublisher, ProHandSubscriber};
-```
-
-See `prohand_capnp_sdk/README.md` for the full API (publish commands, subscribe
-to status, request/reply services).
-
 ## Demo Applications
 
 The SDK includes demo applications in both Python and C++:
 
 ### Python Demos
 
+Run them from `demo/python/src`, with the driver already running.
+
 ```bash
-cd demo/python
+cd demo/python/src
 
 # ProHand demos
-python -m prohand_demo.connect      # Test connection
-python -m prohand_demo.cyclic_motion  # Cyclic joint motion
-python -m prohand_demo.test_hand    # Comprehensive test
+python -m prohand_demo.connect          # Test connection
+python -m prohand_demo.ping             # Send ping commands
+python -m prohand_demo.test_hand        # Per-joint test
+python -m prohand_demo.cyclic_motion    # Sine-wave joint motion
+python -m prohand_demo.keyframe_motion  # Predefined keyframe sequences
+python -m prohand_demo.command_matrix   # Exercise every SDK call, pass/fail table
 
 # ProGlove demos
-python -m proglove_demo.connect     # Test connection
-python -m proglove_demo.test_glove  # Read sensor data
+python -m proglove_demo.connect         # Test connection
+python -m proglove_demo.test_glove      # Read sensor data
+```
+
+**`keyframe_motion`** plays predefined joint-space sequences (`template`,
+`abduction`, `count`, `wave`, `rock-on`, `fist-wrist`) with per-keyframe easing.
+It warns when a sequence asks for more speed than the servos can deliver, and
+`--fit-speed` stretches those transitions so the poses are actually reached:
+
+```bash
+python -m prohand_demo.keyframe_motion --sequence template --dry-run
+python -m prohand_demo.keyframe_motion --sequence wave --fit-speed
+python -m prohand_demo.keyframe_motion --list --sequence count
+```
+
+`--dry-run` prints the whole trajectory without connecting, so a sequence can be
+inspected with no hardware attached.
+
+**`command_matrix`** calls every function the SDK exposes and prints a
+pass/fail/skip table — useful as a one-shot smoke test after installing. Most
+checks pass without a driver, since the transport connects lazily. The two calls
+that drive the hand into its hard stops (auto-calibration and homing) are skipped
+unless you pass `--include-calibration`.
+
+```bash
+python -m prohand_demo.command_matrix
 ```
 
 ### C++ Demos
@@ -406,11 +419,14 @@ The endpoints above are defaults. You can point the client at any host/port:
 
 ```python
 client = ProHandClient(
-    command_endpoint="tcp://192.168.1.10:5562",
-    streaming_endpoint="tcp://192.168.1.10:5563",
-    status_endpoint="tcp://192.168.1.10:5561"
+    "tcp://192.168.1.10:5562",  # command
+    "tcp://192.168.1.10:5561",  # status
+    "tcp://192.168.1.10:5563",  # hand streaming
+    "tcp://192.168.1.10:5564",  # wrist streaming
 )
 ```
+
+The four endpoints are positional, in that order.
 
 ## Limitations
 

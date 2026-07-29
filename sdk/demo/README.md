@@ -37,6 +37,8 @@ demo/
 │       │   ├── connect.py        # Connect to IPC host
 │       │   ├── ping.py           # Send ping command
 │       │   ├── cyclic_motion.py  # Sine wave motion
+│       │   ├── keyframe_motion.py # Predefined keyframe sequences
+│       │   ├── command_matrix.py # Every SDK command, pass/fail report
 │       │   ├── kapandji.py       # Kapandji opposition test
 │       │   ├── test_hand.py      # Individual joint testing
 │       │   ├── debug_streaming.py # Streaming debug utilities
@@ -101,6 +103,18 @@ just test-hand
 
 # Run cyclic motion patterns
 just cyclic-motion
+
+# Play a predefined keyframe sequence (template, abduction, count, wave, rock-on, fist-wrist)
+just keyframe-motion --sequence template
+# Preview the trajectory without moving the hand
+just keyframe-motion --sequence template --dry-run
+# List a sequence's keyframes
+just keyframe-list count
+
+# Exercise every SDK command and print a pass/fail/skip table
+just command-matrix
+# ...including auto-calibration and homing (MOVES THE HAND)
+just command-matrix --include-calibration
 
 # Run Kapandji test (requires PyYAML: `pip install pyyaml` or `uv pip install pyyaml`)
 just kapandji

@@ -50,17 +50,44 @@ handService: HandRequest
 
 **HandRequest variants**:
 
-- `available: Void` - Check if service is available
-- `streamingMode: Bool` - Enable/disable streaming mode
-- `autoCalibration: Bool` - Enable/disable auto-calibration
-- `zeroCalib: List(Bool)` - Zero calibration mask (16 servos)
-- `serviceMode: Bool` - Enable/disable service mode
+- `available: Void` - Release any pending service state (idle / no-op)
+- `streamingMode: StreamingModeTypes` - Streaming-mode selector (see below)
+- `zeroCalib: List(Bool)` - Per-servo neutralize mask (16 entries); `true` = neutralize
+- `autoCalibration: UInt8` - Finger bitmask for auto-calibration. Thumb `0x01`,
+  index `0x02`, middle `0x04`, ring `0x08`, pinky `0x10`. `0` aborts a running
+  calibration; any non-zero value starts it for the indicated fingers
+- `serviceMode: Bool` - Enter/exit full register service mode
+- `sleep: Void` - Request low-power sleep (OTA safe)
+- `homing: Bool` - Start (`true`) or abort (`false`) the homing sequence
+- `readPositionCorrections: Void` - One-shot snapshot of the position-correction register
+- `softwareReset: Void` - Reboot the device; pending NVS writes are flushed first
 
-**Example**: Enable streaming mode
+**StreamingModeTypes**:
 
 ```
-handService = (streamingMode = true)
+struct StreamingModeTypes {
+  union {
+    off        : Void;
+    onDemand   : Void;
+    continuous : SpaceFilter;   # free | jointSpace | actuatorSpace |
+                                # jointSpaceHandWithActuatorSpaceWrist
+  }
+}
 ```
+
+`continuous` additionally re-emits joint-target echoes every hand-task tick. The
+`SpaceFilter` selects which command spaces the firmware accepts: `actuatorSpace`
+drops joint-space commands, so joint control requires `free` or `jointSpace`.
+
+**Example**: Enable streaming, then auto-calibrate the thumb and index
+
+```
+handService = (streamingMode = (onDemand = void))
+handService = (autoCalibration = 0x03)
+```
+
+Auto-calibration drives the selected fingers against their hard stops — keep the
+hand unobstructed, and watch `handState` for `calibrating` and completion.
 
 #### handStateCommand
 
@@ -76,13 +103,25 @@ handStateCommand: HandCommand
 struct HandCommand {
   timestamp: UInt16;
   uid: UInt16;
-  thumb: List(CompactJointState);   # 4 joints
+  thumb: List(CompactJointState);   # 4 joints: [Abd, MCP, PIP, DIP]
   index: List(CompactJointState);   # 4 joints
   middle: List(CompactJointState);  # 4 joints
   ring: List(CompactJointState);    # 4 joints
   pinky: List(CompactJointState);   # 4 joints
+  velocitySaturation: UInt8;        # servo velocity cap, deg/s; 0 = use default
 }
 ```
+
+Joint angles are **anatomical and identical for a left and a right hand** —
+positive abduction splays a finger toward the thumb on both. Handedness is
+resolved entirely by the device's actuator wiring map, so a client sends the same
+joint values regardless of which hand is attached.
+
+`velocitySaturation` caps servo speed for every finger in this command. `0` means
+"use the default" and is resolved by the driver to the configured default
+(50 deg/s); the servo maximum is 110 deg/s. Note this is a *cap*, not a target: a
+trajectory that asks for more travel per unit time than the cap allows will be
+truncated mid-move rather than tracked.
 
 **CompactJointState**:
 

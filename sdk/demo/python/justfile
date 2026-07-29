@@ -31,6 +31,18 @@ udcap-right *args:
 kapandji *args:
     cd src && python3 -m prohand_demo.kapandji {{ args }}
 
+# Play predefined keyframe sequences (template, abduction, count, wave, rock-on, fist-wrist)
+keyframe-motion *args:
+    cd src && python3 -m prohand_demo.keyframe_motion {{ args }}
+
+# Print the keyframes of a sequence without moving the hand
+keyframe-list sequence="template":
+    cd src && python3 -m prohand_demo.keyframe_motion --sequence {{ sequence }} --list
+
+# Exercise every SDK command and report pass/fail coverage
+command-matrix *args:
+    cd src && python3 -m prohand_demo.command_matrix {{ args }}
+
 # Debug streaming mode connectivity
 debug-streaming *args:
     cd src && python3 -m prohand_demo.debug_streaming {{ args }}
