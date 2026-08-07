@@ -1,7 +1,9 @@
 # ProHand, ProGlove & ProWristCam SDK Demo - cdylib FFI approach
 # Demos using the C FFI (dylib) bindings for hand, glove, and wrist camera
 
+[group: 'modules']
 mod python "python/justfile"
+[group: 'modules']
 mod cpp "cpp/justfile"
 
 # Show all commands

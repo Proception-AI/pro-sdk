@@ -1,3 +1,4 @@
+[group: 'modules']
 mod demo "demo/justfile"
 
 # <sdk-dir>:<library-basename> for each shipped SDK (dir name ≠ lib name for

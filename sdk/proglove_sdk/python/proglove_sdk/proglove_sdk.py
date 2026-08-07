@@ -44,6 +44,7 @@ import sys
 from ctypes import (
     CFUNCTYPE,
     POINTER,
+    byref,
     c_char_p,
     c_int,
     c_size_t,
@@ -232,6 +233,28 @@ class ProGloveImuStatus(Structure):
     ]
 
 
+class ProGloveFilterConfig(Structure):
+    """Tunable tactile filter parameters — deadzone sensitivity, stuck-pixel
+    spatial-isolation threshold, and stuck-detection timing. Fetch sensible
+    starting values with get_default_filter_config(), tweak only the fields
+    you care about, then apply with ProGloveClient.set_filter_config() — the
+    underlying command replaces the whole config, not a per-field patch."""
+
+    _fields_ = [
+        ("deadzone_on", c_float),  # fraction of ADC max above which a taxel activates
+        ("deadzone_off", c_float),  # fraction below which an active taxel turns off
+        ("denoise_enabled", c_int),  # stuck-pixel masking on/off
+        (
+            "stuck_spatial_threshold",
+            c_uint16,
+        ),  # raw ADC counts vs. segment neighbors' median
+        (
+            "stuck_streak_on_frames",
+            c_uint,
+        ),  # consecutive flat+isolated frames before flagging, at ~100 Hz
+    ]
+
+
 @dataclass
 class UsbDevice:
     """Python-friendly USB device info"""
@@ -360,8 +383,14 @@ _lib.proglove_calibrate_and_wait.restype = c_int
 _lib.proglove_set_denoise_enabled.argtypes = [POINTER(ProGloveClientHandle), c_int]
 _lib.proglove_set_denoise_enabled.restype = c_int
 
-_lib.proglove_set_filter_enabled.argtypes = [POINTER(ProGloveClientHandle), c_int]
-_lib.proglove_set_filter_enabled.restype = c_int
+_lib.proglove_get_default_filter_config.argtypes = [POINTER(ProGloveFilterConfig)]
+_lib.proglove_get_default_filter_config.restype = c_int
+
+_lib.proglove_set_filter_config.argtypes = [
+    POINTER(ProGloveClientHandle),
+    POINTER(ProGloveFilterConfig),
+]
+_lib.proglove_set_filter_config.restype = c_int
 
 # Status polling
 _lib.proglove_try_recv_status.argtypes = [
@@ -615,21 +644,23 @@ class ProGloveClient:
         return result == 1
 
     def set_denoise_enabled(self, enabled: bool) -> None:
-        """Toggle the median pre-filter + stuck-pixel masking together."""
+        """Toggle stuck-pixel masking."""
         if self._closed:
             raise ConnectionError("Client is closed")
         result = _lib.proglove_set_denoise_enabled(self._handle, 1 if enabled else 0)
         _check_result(result, "set_denoise_enabled")
 
-    def set_filter_enabled(self, enabled: bool) -> None:
+    def set_filter_config(self, config: ProGloveFilterConfig) -> None:
         """
-        Toggle the whole tactile filter pipeline (baseline subtraction, EMA,
-        deadzone, denoise). Disabling gives fully raw, unfiltered taxel values.
+        Replace the entire tactile filter configuration — deadzone on/off,
+        stuck-pixel spatial-isolation threshold, and stuck-detection timing.
+        This replaces the whole config, not a per-field patch — start from
+        get_default_filter_config() and override only what you need.
         """
         if self._closed:
             raise ConnectionError("Client is closed")
-        result = _lib.proglove_set_filter_enabled(self._handle, 1 if enabled else 0)
-        _check_result(result, "set_filter_enabled")
+        result = _lib.proglove_set_filter_config(self._handle, byref(config))
+        _check_result(result, "set_filter_config")
 
     # ========================================================================
     # STATUS POLLING
@@ -758,6 +789,15 @@ def get_version() -> str:
     """Get SDK version"""
     version_ptr = _lib.proglove_get_version()
     return version_ptr.decode("utf-8") if version_ptr else "unknown"
+
+
+def get_default_filter_config() -> ProGloveFilterConfig:
+    """Default tactile filter configuration — a sensible starting point to
+    tweak before calling ProGloveClient.set_filter_config()."""
+    config = ProGloveFilterConfig()
+    result = _lib.proglove_get_default_filter_config(byref(config))
+    _check_result(result, "get_default_filter_config")
+    return config
 
 
 # ============================================================================

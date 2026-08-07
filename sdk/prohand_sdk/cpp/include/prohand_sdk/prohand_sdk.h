@@ -1,540 +1,943 @@
-/**
- * ProHand Client SDK - C API
+/*
+ * ProHand Client SDK — C API
  *
- * This header provides a minimal C interface to the ProHand Client SDK.
+ * GENERATED FILE — do not edit.
+ * Regenerate with: just crates hand-client-sdk header
  *
- * Usage:
- * 1. Create a client with prohand_client_create()
- * 2. Send commands using prohand_send_* functions
- * 3. Poll status with prohand_try_recv_status()
- * 4. Clean up with prohand_client_destroy()
+ * Units are wire units. Rotary positions are raw FT3950 encoder counts
+ * (0-4095, neutral 2048), not degrees. Linear positions are 0.01 mm. Joint
+ * states are CompactJointState pairs: position in 0.01 degrees, velocity or
+ * torque as a full-range int16 normalized to -1.0..1.0.
  *
- * Linking:
- * - Link against libprohand_client_sdk.so (Linux), libprohand_client_sdk.dylib
- * (macOS), or prohand_client_sdk.dll (Windows)
- * - The library is typically located in ../lib/ relative to the header
- * directory
- *
- * Thread Safety: The client handle is NOT thread-safe. Use external
- * synchronization if accessing from multiple threads.
- *
- * Version: 0.1.0
+ * State codes carried in ProHandStateInfo::code:
+ *   rotary / linear (PROHAND_MSG_ROTARY_STATE, PROHAND_MSG_LINEAR_STATE)
+ *     0 clear, 1 idle, 2 servicing, 3 configuring, 4 neutralizing, 5 scanning,
+ *     6 ready, 7 running, 8 shutdown, 9 sleep, 10 all, 11 error (detail =
+ *     servo error code), 12 thermal protection
+ *   hand (PROHAND_MSG_HAND_STATE)
+ *     0 idle, 1 sleep, 2 ready, 3 running (detail = streaming mode),
+ *     4 servicing, 5 calibrating (detail = phase), 6 error (detail = hand
+ *     error), 7 homing, 8 thermal protection
+ *   imu (PROHAND_MSG_IMU_STATE)
+ *     0 idle, 1 running, 2 calibrating, 3 error
+ *   current sense (PROHAND_MSG_CURRENT_SENSE_STATE)
+ *     0 idle, 1 running, 2 error
  */
 
 #ifndef PROHAND_SDK_H
 #define PROHAND_SDK_H
 
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* ========================================================================== */
-/* TYPES AND STRUCTURES */
-/* ========================================================================== */
+#include <stdlib.h>
+#define SERVO_COUNT 16
+#define LINEAR_COUNT 2
 
 /**
- * Opaque handle to a ProHand client instance
+ * Host-side OTA chunk size, in bytes. Deliberately NOT
+ * `OTA_MAX_CHUNK_SIZE`: that is a per-binary RECEIVE bound which feature
+ * unification can raise to 96 in some hosts (proglove-messages enables
+ * `prohand-config/esp32`), while other receivers (driver) stay at 64 —
+ * mismatched senders get every chunk rejected. 64 fits every receiver.
+ */
+#define OTA_HOST_CHUNK_SIZE 64
+
+#define PROHAND_MSG_NONE -1
+
+#define PROHAND_MSG_PONG 0
+
+#define PROHAND_MSG_HAND_REQUEST_ECHO 1
+
+#define PROHAND_MSG_ROTARY_STATE 2
+
+#define PROHAND_MSG_LINEAR_STATE 3
+
+#define PROHAND_MSG_HAND_STATE 4
+
+#define PROHAND_MSG_ROTARY_GRP_STATUS 5
+
+#define PROHAND_MSG_LINEAR_GRP_STATUS 6
+
+#define PROHAND_MSG_ROTARY_GRP_TARGET 7
+
+#define PROHAND_MSG_LINEAR_GRP_TARGET 8
+
+#define PROHAND_MSG_HANDEDNESS 9
+
+#define PROHAND_MSG_IMU_STATUS 10
+
+#define PROHAND_MSG_IMU_STATE 11
+
+#define PROHAND_MSG_TIME_SYNC_ACK 12
+
+#define PROHAND_MSG_ALERT 13
+
+#define PROHAND_MSG_CURRENT_SENSE_STATUS 14
+
+#define PROHAND_MSG_CURRENT_SENSE_STATE 15
+
+#define PROHAND_MSG_HAND_JOINT_TARGET 16
+
+#define PROHAND_MSG_WRIST_JOINT_TARGET 17
+
+#define PROHAND_MSG_HAND_JOINT_STATUS 18
+
+#define PROHAND_MSG_WRIST_JOINT_STATUS 19
+
+#define PROHAND_MSG_ROTARY_SRV_STATUS 100
+
+#define PROHAND_MSG_LINEAR_SRV_STATUS 101
+
+#define PROHAND_MSG_OTA_STATUS 102
+
+#define PROHAND_MSG_METADATA 103
+
+#define PROHAND_MSG_CALIBRATION_RAMP_SAMPLE 104
+
+#define PROHAND_MSG_CALIBRATION_TRIM 105
+
+#define PROHAND_MSG_CALIBRATION_PROGRESS 106
+
+#define PROHAND_MSG_POSITION_CORRECTION_SNAPSHOT 107
+
+#define PROHAND_MSG_TX_DROP_REPORT 108
+
+#define PROHAND_MSG_IMU_TUNING_CONFIG 109
+
+#define PROHAND_MSG_IDENTITY_RESPONSE 110
+
+#define PROHAND_CALIB_ABORT 0
+
+#define PROHAND_CALIB_THUMB 1
+
+#define PROHAND_CALIB_INDEX 2
+
+#define PROHAND_CALIB_MIDDLE 4
+
+#define PROHAND_CALIB_RING 8
+
+#define PROHAND_CALIB_PINKY 16
+
+#define PROHAND_CALIB_ALL 31
+
+#define PROHAND_SUCCESS 0
+
+#define PROHAND_ERROR_NULL -1
+
+#define PROHAND_ERROR_CONNECTION -2
+
+#define PROHAND_ERROR_INVALID_ARGUMENT -3
+
+#define PROHAND_ERROR_NOT_CONNECTED -4
+
+#define PROHAND_ERROR_UNSUPPORTED -5
+
+#define PROHAND_ERROR_OTHER -99
+
+/**
+ * Result codes for FFI functions
+ */
+typedef enum ProHandResult {
+  ProHandResult_Success = 0,
+  ProHandResult_ErrorNull = -1,
+  ProHandResult_ErrorConnection = -2,
+  ProHandResult_ErrorInvalidArgument = -3,
+  ProHandResult_ErrorNotConnected = -4,
+  ProHandResult_ErrorUnsupported = -5,
+  ProHandResult_ErrorOther = -99,
+} ProHandResult;
+
+/**
+ * Which firmware subsystem emitted the alert.
+ *
+ * Encoded as bit values so multiple sources can be OR-combined into a single
+ * `u8` mask in firmware state tracking (e.g. the hand task tracking which
+ * subsystems are currently in thermal lockdown).
+ */
+enum AlertSource
+#ifdef __cplusplus
+    : uint8_t
+#endif // __cplusplus
+{
+  AlertSource_Hand = (1 << 0),
+  AlertSource_Rotary = (1 << 1),
+  AlertSource_Linear = (1 << 2),
+  AlertSource_Calibration = (1 << 3),
+  AlertSource_Imu = (1 << 4),
+  AlertSource_System = (1 << 5),
+};
+#ifndef __cplusplus
+typedef uint8_t AlertSource;
+#endif // __cplusplus
+
+/**
+ * How severe the alert is.
+ */
+enum AlertSeverity
+#ifdef __cplusplus
+    : uint8_t
+#endif // __cplusplus
+{
+  /**
+   * Informational — no action required.
+   */
+  AlertSeverity_Info = 0,
+  /**
+   * Degraded operation — calibration may continue but result may be affected.
+   */
+  AlertSeverity_Warning = 1,
+  /**
+   * Fatal for the current operation — firmware is about to return an error
+   * state.
+   */
+  AlertSeverity_Error = 2,
+};
+#ifndef __cplusplus
+typedef uint8_t AlertSeverity;
+#endif // __cplusplus
+
+/**
+ * Stage of a thermal event, carried directly on `ProHandAlert::thermal_event`.
+ *
+ * `None` is the default for any alert that is not a thermal event. Thermal
+ * alerts always set one of `Warning` / `Protection` / `Recovered`.
+ */
+enum ThermalEvent
+#ifdef __cplusplus
+    : uint8_t
+#endif // __cplusplus
+{
+  /**
+   * Not a thermal event — default for non-thermal alerts.
+   */
+  ThermalEvent_None = 0,
+  /**
+   * Subsystem crossed its warning temperature (alert-only, no lockdown).
+   */
+  ThermalEvent_Warning = 1,
+  /**
+   * Subsystem crossed its over-temperature threshold — hand is entering
+   * `HandState::ThermalProtection`.
+   */
+  ThermalEvent_Protection = 2,
+  /**
+   * Subsystem cooled back below its recovery threshold — clears the
+   * protection bit; hand returns to `Ready` once every subsystem clears.
+   */
+  ThermalEvent_Recovered = 3,
+};
+#ifndef __cplusplus
+typedef uint8_t ThermalEvent;
+#endif // __cplusplus
+
+/**
+ * Opaque handle to a ProHandIpcClient
  */
 typedef struct ProHandClientHandle ProHandClientHandle;
 
 /**
- * Result codes returned by SDK functions
+ * USB Device information (simplified - only what we can provide)
  */
-typedef enum {
-  PROHAND_SUCCESS = 0,
-  PROHAND_ERROR_NULL = -1,
-  PROHAND_ERROR_CONNECTION = -2,
-  PROHAND_ERROR_INVALID_ARGUMENT = -3,
-  PROHAND_ERROR_NOT_CONNECTED = -4,
-  PROHAND_ERROR_UNSUPPORTED = -5,
-  PROHAND_ERROR_OTHER = -99
-} ProHandResult;
-
-/**
- * USB device information
- */
-typedef struct {
-  const char *
-      port_name; /* Path to device - must be freed with prohand_free_string() */
-  const char *display_name; /* Display name with serial info - must be freed
-                               with prohand_free_string() */
+typedef struct ProHandUsbDeviceInfo {
+  const char *port_name;
+  const char *display_name;
 } ProHandUsbDeviceInfo;
 
 /**
- * Hand status information
+ * Rotary/linear positions and targets only. Superseded by
+ * [`crate::ffi_message::ProHandMessage`], which covers every message kind.
+ *
+ * **One kind per call.** `status_type` says which of the four arrays was
+ * filled; the other three are zero. Reading `rotary_targets` off a `status_type
+ * == 1` frame yields zeroes, not the commanded target — that is this struct's
+ * shape, not a missing target echo.
  */
-typedef struct {
-  int is_valid;    /* Whether status data is valid */
-  int status_type; /* 0=other, 1=rotary status, 2=linear status,
-                      3=rotary target, 4=linear target */
-  /* All positions are raw int16 in centidegrees (0.01 deg per count).
-     Only the array matching status_type is populated on any given read. */
-  int16_t rotary_positions[16]; /* Measured rotary positions */
-  int16_t linear_positions[2];  /* Measured linear positions */
-  int16_t rotary_targets[16];   /* Commanded rotary targets */
-  int16_t linear_targets[2];    /* Commanded linear targets */
+typedef struct ProHandStatusInfo {
+  int is_valid;
+  /**
+   * 0 unknown, 1 rotary status, 2 linear status, 3 rotary target, 4 linear
+   * target.
+   */
+  int status_type;
+  /**
+   * Rotary feedback in raw FT3950 encoder counts, 0–4095 (neutral 2048).
+   * Not degrees — the wire carries counts. Valid when `status_type == 1`.
+   */
+  short rotary_positions[16];
+  /**
+   * Linear feedback in 0.01 mm stroke counts. Valid when `status_type == 2`.
+   */
+  short linear_positions[2];
+  /**
+   * Commanded rotary targets in encoder counts. Valid when `status_type == 3`.
+   */
+  short rotary_targets[16];
+  /**
+   * Commanded linear targets in 0.01 mm counts. Valid when `status_type == 4`.
+   */
+  short linear_targets[2];
 } ProHandStatusInfo;
 
-/* ========================================================================== */
-/* CLIENT LIFECYCLE */
-/* ========================================================================== */
+typedef struct RotaryStatus {
+  int16_t position;
+  int16_t velocity;
+  uint16_t torque;
+  uint8_t temperature;
+  uint8_t voltage;
+} RotaryStatus;
+
+/**
+ * Timestamped batch of all rotary servo statuses.
+ * `timestamp_ms` is the firmware monotonic clock (same domain as `ImuStatus`)
+ * captured immediately after the servo bus read loop completes.
+ */
+typedef struct RotaryStatusStamped {
+  /**
+   * Firmware monotonic timestamp in milliseconds when this batch was assembled.
+   */
+  uint32_t timestamp_ms;
+  struct RotaryStatus servos[SERVO_COUNT];
+} RotaryStatusStamped;
+
+typedef struct RotaryCommand {
+  int16_t position;
+  uint16_t torque;
+  uint8_t velocity;
+} RotaryCommand;
+
+/**
+ * Timestamped batch of commanded rotary targets (echo).
+ * `timestamp_ms` is when the firmware applied this command to the bus,
+ * enabling precise command-to-response latency: `status.ts − target.ts`.
+ */
+typedef struct RotaryTargetStamped {
+  uint32_t timestamp_ms;
+  struct RotaryCommand commands[SERVO_COUNT];
+} RotaryTargetStamped;
+
+typedef struct LinearStatus {
+  int16_t position;
+  int16_t current;
+  int16_t speed;
+  uint16_t error;
+  int16_t temp;
+} LinearStatus;
+
+/**
+ * Timestamped batch of all linear actuator statuses.
+ * `timestamp_ms` is the firmware monotonic clock (same domain as `ImuStatus`)
+ * captured immediately after the linear bus read loop completes.
+ */
+typedef struct LinearStatusStamped {
+  uint32_t timestamp_ms;
+  struct LinearStatus actuators[LINEAR_COUNT];
+} LinearStatusStamped;
+
+typedef struct LinearCommand {
+  int16_t position;
+  uint16_t speed;
+  uint8_t torque;
+} LinearCommand;
+
+/**
+ * Timestamped batch of commanded linear targets (echo).
+ */
+typedef struct LinearTargetStamped {
+  uint32_t timestamp_ms;
+  struct LinearCommand commands[LINEAR_COUNT];
+} LinearTargetStamped;
+
+typedef struct CompactJointState {
+  int16_t scaled_position;
+  int16_t normalized_vel_or_tau;
+} CompactJointState;
+
+/**
+ * Finger joint position command (one frame at a time).
+ */
+typedef struct HandCommand {
+  /**
+   * Monotonic sequence counter (wraps). Used to detect dropped frames.
+   */
+  uint16_t timestamp;
+  uint16_t uid;
+  struct CompactJointState thumb[4];
+  struct CompactJointState index[4];
+  struct CompactJointState middle[4];
+  struct CompactJointState ring[4];
+  struct CompactJointState pinky[4];
+  /**
+   * Global maximum servo velocity cap applied to all fingers.
+   * `0` = use firmware `DEFAULT_VELOCITY`.
+   */
+  uint8_t velocity_saturation;
+} HandCommand;
+
+/**
+ * Timestamped echo of a `HandCommand` accepted by the firmware.
+ * `timestamp_ms` is the firmware monotonic time when the command was
+ * consumed by the hand task — pair with `RotaryGrpStatus.timestamp_ms`
+ * for command-to-response latency. `command.timestamp` is the host
+ * sequence counter and remains untouched for drop detection.
+ */
+typedef struct HandJointTargetStamped {
+  uint32_t timestamp_ms;
+  struct HandCommand command;
+} HandJointTargetStamped;
+
+/**
+ * Forward-kinematics estimate of finger joint state derived from the
+ * rotary-bus feedback. `timestamp_ms` is the firmware monotonic time at FK
+ * evaluation — pairs with `HandJointTarget.timestamp_ms` for command-vs-FK
+ * tracking. Per-finger × per-joint shape mirrors `HandCommand` so host code
+ * can index identically.
+ */
+typedef struct HandJointStatusStamped {
+  uint32_t timestamp_ms;
+  struct CompactJointState thumb[4];
+  struct CompactJointState index[4];
+  struct CompactJointState middle[4];
+  struct CompactJointState ring[4];
+  struct CompactJointState pinky[4];
+} HandJointStatusStamped;
+
+/**
+ * Wrist joint position command.
+ */
+typedef struct WristCommand {
+  uint16_t timestamp;
+  uint16_t uid;
+  struct CompactJointState wrist[2];
+} WristCommand;
+
+/**
+ * Timestamped echo of a `WristCommand` accepted by the firmware.
+ * See `HandJointTargetStamped` for the timestamp contract.
+ */
+typedef struct WristJointTargetStamped {
+  uint32_t timestamp_ms;
+  struct WristCommand command;
+} WristJointTargetStamped;
+
+/**
+ * FK estimate of wrist joint state derived from the linear-actuator feedback.
+ */
+typedef struct WristJointStatusStamped {
+  uint32_t timestamp_ms;
+  struct CompactJointState wrist[2];
+} WristJointStatusStamped;
+
+typedef struct ImuStatus {
+  /**
+   * Firmware monotonic timestamp in milliseconds (wraps after ~49 days)
+   */
+  uint32_t timestamp_ms;
+  float temp;
+  float accel_x;
+  float accel_y;
+  float accel_z;
+  float gyro_x;
+  float gyro_y;
+  float gyro_z;
+  float qw;
+  float qx;
+  float qy;
+  float qz;
+} ImuStatus;
+
+/**
+ * INA219 sample.
+ *
+ * `timestamp_ms` is the firmware monotonic clock (same domain as `ImuStatus`).
+ */
+typedef struct CurrentSenseStatus {
+  uint32_t timestamp_ms;
+  /**
+   * Bus voltage in millivolts. INA219 LSB = 4 mV.
+   */
+  uint16_t bus_voltage_mv;
+  /**
+   * Shunt voltage in microvolts. Signed (current direction).
+   */
+  int32_t shunt_uv;
+  /**
+   * Load current in milliamps. Sign matches shunt direction.
+   */
+  int16_t current_ma;
+  /**
+   * Power in milliwatts.
+   */
+  uint16_t power_mw;
+} CurrentSenseStatus;
+
+/**
+ * Unified firmware diagnostic alert, emitted over USB instead of defmt.
+ */
+typedef struct ProHandAlert {
+  /**
+   * Firmware monotonic timestamp in milliseconds. `0` when unavailable.
+   */
+  uint32_t timestamp_ms;
+  /**
+   * Which subsystem raised the alert.
+   */
+  AlertSource source;
+  /**
+   * Severity level.
+   */
+  AlertSeverity severity;
+  /**
+   * Source-specific error code (see module-level doc for interpretation).
+   * `0` for thermal alerts (the typed `thermal_event` and `source` already
+   * carry the full meaning).
+   */
+  uint16_t code;
+  /**
+   * Actuator index the alert relates to; `NOT_APPLICABLE` (0xFF) when
+   * not actuator-specific.
+   */
+  uint8_t actuator;
+  /**
+   * Extra context: servo mask, retry count, torque reading, stage id, etc.
+   * For thermal alerts this carries the peak temperature in °C
+   * (re-interpreted as `i16`).
+   */
+  uint16_t detail;
+  /**
+   * Thermal-event stage. `None` for any non-thermal alert; one of
+   * `Warning` / `Protection` / `Recovered` when this is a thermal alert
+   * emitted by an `is_thermal_capable` source (Rotary / Linear / Imu).
+   */
+  ThermalEvent thermal_event;
+} ProHandAlert;
+/**
+ * Sentinel value for `actuator` meaning the alert is not tied to a
+ * specific actuator (e.g. bus-wide errors, sensor alerts). Picked at
+ * `0xFF` because actuator indices live in `0..SERVO_COUNT (16)`, so
+ * any real index is far below this value.
+ */
+#define ProHandAlert_NOT_APPLICABLE 255
+
+/**
+ * Subsystem state transition — rotary, linear, hand, IMU or current sense.
+ *
+ * `ServoState` and `HandState` carry payloads on some variants, so they cannot
+ * cross a C ABI as-is. `code` is the variant index and `detail` its payload:
+ * the servo error code, the streaming mode, or the calibration phase. The
+ * tables are in the generated header.
+ */
+typedef struct ProHandStateInfo {
+  uint8_t code;
+  uint8_t _pad;
+  uint16_t detail;
+} ProHandStateInfo;
+
+/**
+ * Only the arm named by [`ProHandMessage::kind`] is initialised.
+ *
+ * Every arm but [`Self::state`] and [`Self::handedness`] is a
+ * `prohand-messages` type verbatim.
+ */
+typedef union ProHandMessagePayload {
+  struct RotaryStatusStamped rotary_status;
+  struct RotaryTargetStamped rotary_target;
+  struct LinearStatusStamped linear_status;
+  struct LinearTargetStamped linear_target;
+  struct HandJointTargetStamped hand_joint_target;
+  struct HandJointStatusStamped hand_joint_status;
+  struct WristJointTargetStamped wrist_joint_target;
+  struct WristJointStatusStamped wrist_joint_status;
+  struct ImuStatus imu;
+  struct CurrentSenseStatus power;
+  struct ProHandAlert alert;
+  struct ProHandStateInfo state;
+  /**
+   * 0 unknown, 1 left, 2 right.
+   */
+  uint8_t handedness;
+  /**
+   * Kinds reported by number only. Zeroed.
+   */
+  uint8_t raw[168];
+} ProHandMessagePayload;
+
+/**
+ * One status message: its wire kind, its firmware timestamp, and its payload.
+ */
+typedef struct ProHandMessage {
+  /**
+   * A `PROHAND_MSG_*` value — the `ProHandStatus` discriminant.
+   */
+  int kind;
+  /**
+   * Firmware monotonic milliseconds, or 0 for kinds carrying no timestamp.
+   * Also readable from the payload's own `timestamp_ms` where it has one.
+   */
+  uint32_t timestamp_ms;
+  union ProHandMessagePayload payload;
+} ProHandMessage;
+
+/**
+ * Size of every struct the FFI hands across the boundary, for load-time
+ * verification by a language wrapper that declares the layout itself.
+ */
+typedef struct ProHandAbiSizes {
+  uint32_t message;
+  uint32_t payload;
+  uint32_t rotary_status_stamped;
+  uint32_t rotary_target_stamped;
+  uint32_t linear_status_stamped;
+  uint32_t linear_target_stamped;
+  uint32_t hand_joint_target_stamped;
+  uint32_t hand_joint_status_stamped;
+  uint32_t wrist_joint_target_stamped;
+  uint32_t wrist_joint_status_stamped;
+  uint32_t imu_status;
+  uint32_t current_sense_status;
+  uint32_t alert;
+  uint32_t state_info;
+  uint32_t status_info;
+} ProHandAbiSizes;
+
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
 
 /**
  * Create a new ProHand IPC client with all endpoints
  *
- * @param command_endpoint ZeroMQ endpoint for commands (e.g.,
+ * # Parameters
+ * - `command_endpoint`: ZeroMQ endpoint for commands (e.g.,
  * "tcp://127.0.0.1:5562")
- * @param status_endpoint ZeroMQ endpoint for status (e.g.,
+ * - `status_endpoint`: ZeroMQ endpoint for status (e.g.,
  * "tcp://127.0.0.1:5561")
- * @param hand_streaming_endpoint ZeroMQ endpoint for hand streaming (e.g.,
+ * - `hand_streaming_endpoint`: ZeroMQ endpoint for hand streaming (e.g.,
  * "tcp://127.0.0.1:5563")
- * @param wrist_streaming_endpoint ZeroMQ endpoint for wrist streaming (e.g.,
+ * - `wrist_streaming_endpoint`: ZeroMQ endpoint for wrist streaming (e.g.,
  * "tcp://127.0.0.1:5564")
- * @return Pointer to client handle on success, NULL on failure
  *
- * The hand and wrist streaming endpoints use separate PUB/SUB channels for
- * high-frequency control. Hand streaming is for finger commands, wrist
- * streaming is for wrist commands.
+ * # Returns
+ * - Pointer to ProHandClientHandle on success, null on failure
  *
- * Example:
- *   ProHandClientHandle* client = prohand_client_create(
- *       "tcp://127.0.0.1:5562",   // Command endpoint
- *       "tcp://127.0.0.1:5561",   // Status endpoint
- *       "tcp://127.0.0.1:5563",   // Hand streaming endpoint
- *       "tcp://127.0.0.1:5564"    // Wrist streaming endpoint
- *   );
+ * # Safety
+ * The returned pointer must be freed with `prohand_client_destroy()`
  */
-ProHandClientHandle *
+struct ProHandClientHandle *
 prohand_client_create(const char *command_endpoint, const char *status_endpoint,
                       const char *hand_streaming_endpoint,
                       const char *wrist_streaming_endpoint);
 
 /**
- * Destroy a ProHand client handle and free resources
+ * Destroy a ProHand client handle
  *
- * @param handle Client handle to destroy
+ * # Safety
+ * The handle must have been created with `prohand_client_create()` and not
+ * already freed
  */
-void prohand_client_destroy(ProHandClientHandle *handle);
+void prohand_client_destroy(struct ProHandClientHandle *handle);
 
 /**
- * Check if client is connected to the device
- *
- * @param handle Client handle
- * @return 1 if connected, 0 if not connected
+ * Check if client is connected
  */
-int prohand_client_is_connected(const ProHandClientHandle *handle);
+int prohand_client_is_connected(const struct ProHandClientHandle *handle);
 
 /**
- * Milliseconds elapsed since the last status message arrived
+ * Milliseconds elapsed since the last status message arrived on the status
+ * channel.
  *
- * Finer-grained liveness than prohand_client_is_connected(), which stays 1 for
- * up to 10 seconds after the driver goes silent — this is the value that
- * watchdog reads. Poll it to detect a stalled driver sooner.
+ * Finer-grained than `prohand_client_is_connected()`, which stays true for up
+ * to 10 s after the driver goes silent — this is the value that watchdog reads.
+ * Seeded at client creation, so it reports a fresh age before any status has
+ * ever arrived; treat it as meaningful only once the first status has been
+ * received.
  *
- * The counter is seeded when the client is created, so it reports a small age
- * before any status has ever arrived. Treat the value as meaningful only after
- * the first successful prohand_try_recv_status().
- *
- * @param handle Client handle
- * @param out_ms Written with the elapsed milliseconds on success
- * @return PROHAND_SUCCESS on success, error code on failure
- *
- * Example:
- *   uint64_t age_ms;
- *   if (prohand_ms_since_last_heartbeat(client, &age_ms) == PROHAND_SUCCESS &&
- *       age_ms > 500) {
- *       // Driver has gone quiet — stop commanding motion.
- *   }
+ * # Parameters
+ * - `out_ms`: Written with the elapsed milliseconds on success
  */
-ProHandResult prohand_ms_since_last_heartbeat(const ProHandClientHandle *handle,
-                                              uint64_t *out_ms);
-
-/* ========================================================================== */
-/* COMMAND FUNCTIONS */
-/* ========================================================================== */
+enum ProHandResult
+prohand_ms_since_last_heartbeat(const struct ProHandClientHandle *handle,
+                                uint64_t *out_ms);
 
 /**
- * Send a ping command to the device
- *
- * @param handle Client handle
- * @return PROHAND_SUCCESS on success, error code on failure
+ * Send a ping command
  */
-ProHandResult prohand_send_ping(const ProHandClientHandle *handle);
+enum ProHandResult prohand_send_ping(const struct ProHandClientHandle *handle);
 
 /**
  * Enable or disable streaming mode
- *
- * In streaming mode, commands are sent at high frequency with lower latency.
- *
- * @param handle Client handle
- * @param enabled Non-zero to enable, 0 to disable
- * @return PROHAND_SUCCESS on success, error code on failure
  */
-ProHandResult prohand_set_streaming_mode(const ProHandClientHandle *handle,
-                                         int enabled);
+enum ProHandResult
+prohand_set_streaming_mode(const struct ProHandClientHandle *handle,
+                           int enabled);
 
 /**
- * Send rotary motor commands via REQ/REP command channel (16 motors)
+ * Send rotary commands via REQ/REP command channel (16 motors)
  *
- * Uses the command socket. For high-frequency commands, use
+ * Uses the command socket (REQ/REP). For high-frequency commands, use
  * prohand_send_rotary_streams() instead.
  *
- * @param handle Client handle
- * @param positions Array of 16 position values in radians
- * @param torques Array of 16 torque values (normalized 0.0 to 1.0)
- * @return PROHAND_SUCCESS on success, error code on failure
- *
- * Example:
- *   float positions[16] = {0.0f, 0.5f, ...};
- *   float torques[16] = {0.45f, 0.45f, ...};
- *   prohand_send_rotary_commands(client, positions, torques);
+ * # Parameters
+ * - `positions`: Array of 16 position values in radians
+ * - `torques`: Array of 16 torque values (normalized 0.0 to 1.0)
  */
-ProHandResult prohand_send_rotary_commands(const ProHandClientHandle *handle,
-                                           const float *positions,
-                                           const float *torques);
+enum ProHandResult
+prohand_send_rotary_commands(const struct ProHandClientHandle *handle,
+                             const float *positions, const float *torques);
 
 /**
- * Send rotary motor commands via PUB/SUB streaming channel (16 motors)
+ * Send rotary commands via PUB/SUB streaming channel (16 motors)
  *
- * Uses the streaming socket for high-frequency commands.
- * Requires: Client created with streaming endpoint AND driver in streaming mode
- *           (call prohand_set_streaming_mode(handle, 1) first).
+ * Uses the streaming socket (PUB/SUB) for high-frequency commands.
+ * Requires: Client created with streaming endpoint AND driver in streaming
+ * mode.
  *
- * @param handle Client handle
- * @param positions Array of 16 position values in radians
- * @param torques Array of 16 torque values (normalized 0.0 to 1.0)
- * @return PROHAND_SUCCESS on success,
- *         PROHAND_ERROR_NOT_CONNECTED if streaming not available
+ * # Parameters
+ * - `positions`: Array of 16 position values in radians
+ * - `torques`: Array of 16 torque values (normalized 0.0 to 1.0)
  *
- * Example:
- *   // Setup
- *   client = prohand_client_create(
- *       "tcp://127.0.0.1:5562",   // Command endpoint
- *       "tcp://127.0.0.1:5561",   // Status endpoint
- *       "tcp://127.0.0.1:5563",   // Hand streaming endpoint
- *       "tcp://127.0.0.1:5564"    // Wrist streaming endpoint
- *   );
- *   prohand_set_streaming_mode(client, 1);  // Enable on driver
- *
- *   // High-frequency loop
- *   for (...) {
- *       prohand_send_rotary_streams(client, positions, torques);
- *   }
+ * # Returns
+ * - PROHAND_ERROR_NOT_CONNECTED if streaming endpoint was not provided at
+ * client creation
  */
-ProHandResult prohand_send_rotary_streams(const ProHandClientHandle *handle,
-                                          const float *positions,
-                                          const float *torques);
+enum ProHandResult
+prohand_send_rotary_streams(const struct ProHandClientHandle *handle,
+                            const float *positions, const float *torques);
 
 /**
- * Send linear motor commands via REQ/REP command channel (2 motors)
+ * Send linear commands via REQ/REP command channel (2 motors)
  *
- * Uses the command socket. For high-frequency commands, use
+ * Uses the command socket (REQ/REP). For high-frequency commands, use
  * prohand_send_linear_streams() instead.
  *
- * @param handle Client handle
- * @param positions Array of 2 position values in radians
- * @param speeds Array of 2 speed values (normalized 0.0 to 1.0)
- * @return PROHAND_SUCCESS on success, error code on failure
- *
- * Example:
- *   float positions[2] = {0.0f, 0.0f};
- *   float speeds[2] = {1.0f, 1.0f};
- *   prohand_send_linear_commands(client, positions, speeds);
+ * # Parameters
+ * - `positions`: Array of 2 position values in radians
+ * - `speeds`: Array of 2 speed values (normalized 0.0 to 1.0)
  */
-ProHandResult prohand_send_linear_commands(const ProHandClientHandle *handle,
-                                           const float *positions,
-                                           const float *speeds);
+enum ProHandResult
+prohand_send_linear_commands(const struct ProHandClientHandle *handle,
+                             const float *positions, const float *speeds);
 
 /**
- * Send linear motor commands via PUB/SUB streaming channel (2 motors)
+ * Send linear commands via PUB/SUB streaming channel (2 motors)
  *
- * Uses the streaming socket for high-frequency commands.
+ * Uses the streaming socket (PUB/SUB) for high-frequency commands.
  * Requires: Client created with streaming endpoint AND driver in streaming
  * mode.
  *
- * @param handle Client handle
- * @param positions Array of 2 position values in radians
- * @param speeds Array of 2 speed values (normalized 0.0 to 1.0)
- * @return PROHAND_SUCCESS on success,
- *         PROHAND_ERROR_NOT_CONNECTED if streaming not available
+ * # Parameters
+ * - `positions`: Array of 2 position values in radians
+ * - `speeds`: Array of 2 speed values (normalized 0.0 to 1.0)
+ *
+ * # Returns
+ * - PROHAND_ERROR_NOT_CONNECTED if streaming endpoint was not provided at
+ * client creation
  */
-ProHandResult prohand_send_linear_streams(const ProHandClientHandle *handle,
-                                          const float *positions,
-                                          const float *speeds);
+enum ProHandResult
+prohand_send_linear_streams(const struct ProHandClientHandle *handle,
+                            const float *positions, const float *speeds);
 
 /**
- * Send wrist joint command via REQ/REP command channel (high-level wrist
- * joints)
+ * Perform zero calibration on selected joints
  *
- * Uses the command socket. For high-frequency commands, use
- * prohand_send_wrist_streams() instead.
- *
- * @param handle Client handle
- * @param positions Array of 2 wrist joint angles in radians
- * @param use_profiler Whether to use the wrist motion profiler (position-only
- * profiling, commands max velocity; velocities are implicit [1.0, 1.0])
- * @return PROHAND_SUCCESS on success, error code on failure
+ * # Parameters
+ * - `mask`: Array of 16 boolean values (0 or 1) indicating which joints to
+ * calibrate
  */
-ProHandResult prohand_send_wrist_command(const ProHandClientHandle *handle,
-                                         const float *positions,
-                                         bool use_profiler);
+enum ProHandResult
+prohand_send_zero_calibration(const struct ProHandClientHandle *handle,
+                              const int *mask);
 
 /**
- * Send wrist joint command via PUB/SUB streaming channel (high-level wrist
- * joints)
+ * Start or abort auto-calibration for the selected fingers.
  *
- * Uses the streaming socket for high-frequency commands.
- * Requires: Client created with streaming endpoint AND driver in streaming
- * mode.
- *
- * @param handle Client handle
- * @param positions Array of 2 wrist joint angles in radians
- * @param use_profiler Whether to use the wrist motion profiler (position-only
- * profiling, commands max velocity; velocities are implicit [1.0, 1.0])
- * @return PROHAND_SUCCESS on success,
- *         PROHAND_ERROR_NOT_CONNECTED if streaming not available
+ * # Parameters
+ * - `finger_mask`: Bitmask of fingers to calibrate — thumb 0x01, index 0x02,
+ *   middle 0x04, ring 0x08, pinky 0x10. `0` aborts a running calibration.
  */
-ProHandResult prohand_send_wrist_streams(const ProHandClientHandle *handle,
-                                         const float *positions,
-                                         bool use_profiler);
+enum ProHandResult
+prohand_send_auto_calibration(const struct ProHandClientHandle *handle,
+                              uint8_t finger_mask);
 
 /**
- * Configure wrist motion limits (only applies if motion profiler is enabled).
+ * Start or abort the homing sequence.
  *
- * @param handle Client handle
- * @param max_velocity Array of 2 values (rad/s)
- * @param max_acceleration Array of 2 values (rad/s^2)
- * @param max_jerk Array of 2 values (rad/s^3)
- * @return PROHAND_SUCCESS on success, PROHAND_ERROR_UNSUPPORTED if profiler
- * disabled in the build
+ * # Parameters
+ * - `enabled`: Non-zero starts homing, zero aborts it
  */
-ProHandResult prohand_set_wrist_limits(const ProHandClientHandle *handle,
-                                       const float max_velocity[2],
-                                       const float max_acceleration[2],
-                                       const float max_jerk[2]);
+enum ProHandResult prohand_send_homing(const struct ProHandClientHandle *handle,
+                                       int enabled);
 
 /**
  * Send hand command via REQ/REP command channel (high-level joint angles, uses
  * inverse kinematics)
  *
- * Uses the command socket. For high-frequency commands, use
+ * Uses the command socket (REQ/REP). For high-frequency commands, use
  * prohand_send_hand_streams() instead.
  *
  * This sends joint angles per finger, which the firmware processes through
  * inverse kinematics to compute actuator positions. This is the high-level API.
  *
- * @param handle Client handle
- * @param positions Array of 20 floats (5 fingers × 4 joints) in radians
- *                  Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15],
- * pinky[16-19]
- * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
- * joints
- * @param velocity_saturation Global servo velocity cap applied to all fingers.
- * Pass 0 to use the default velocity; the driver resolves it.
- * @return PROHAND_SUCCESS on success, error code on failure
+ * # Parameters
+ * - `positions`: Array of 20 floats (5 fingers × 4 joints) in radians
+ *   Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
+ * - `torque`: Single torque value (normalized 0.0 to 1.0) applied to all joints
  *
- * Example:
- *   float positions[20] = {0.0, 0.0, 0.0, 0.0,  // thumb
- *                          0.0, 0.0, 0.0, 0.0,  // index
- *                          0.0, 0.0, 0.0, 0.0,  // middle
- *                          0.0, 0.0, 0.0, 0.0,  // ring
- *                          0.0, 0.0, 0.0, 0.0}; // pinky
- *   prohand_send_hand_command(client, positions, 0.45, 0);
+ * # Returns
+ * - ProHandResult::Success on success
+ * - ProHandResult::ErrorNull if handle or positions is null
+ * - ProHandResult::ErrorOther on other errors
  */
-ProHandResult prohand_send_hand_command(const ProHandClientHandle *handle,
-                                        const float *positions, float torque,
-                                        uint8_t velocity_saturation);
+enum ProHandResult
+prohand_send_hand_command(const struct ProHandClientHandle *handle,
+                          const float *positions, float torque,
+                          uint8_t velocity_saturation);
 
 /**
  * Send hand command via PUB/SUB streaming channel (high-level joint angles,
  * uses inverse kinematics)
  *
- * Uses the streaming socket for high-frequency commands.
+ * Uses the streaming socket (PUB/SUB) for high-frequency commands.
  * Requires: Client created with streaming endpoint AND driver in streaming
  * mode.
  *
  * This sends joint angles per finger, which the firmware processes through
  * inverse kinematics to compute actuator positions. This is the high-level API.
  *
- * @param handle Client handle
- * @param positions Array of 20 floats (5 fingers × 4 joints) in radians
- *                  Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15],
- * pinky[16-19]
- * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
- * joints
- * @param velocity_saturation Global servo velocity cap applied to all fingers.
- * Pass 0 to use the default velocity; the driver resolves it.
- * @return PROHAND_SUCCESS on success,
- *         PROHAND_ERROR_NOT_CONNECTED if streaming not available
+ * # Parameters
+ * - `positions`: Array of 20 floats (5 fingers × 4 joints) in radians
+ *   Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
+ * - `torque`: Single torque value (normalized 0.0 to 1.0) applied to all joints
  *
- * Example:
- *   // Setup
- *   client = prohand_client_create(
- *       "tcp://127.0.0.1:5562",   // Command endpoint
- *       "tcp://127.0.0.1:5561",   // Status endpoint
- *       "tcp://127.0.0.1:5563",   // Hand streaming endpoint
- *       "tcp://127.0.0.1:5564"    // Wrist streaming endpoint
- *   );
- *   prohand_set_streaming_mode(client, 1);  // Enable on driver
- *
- *   // High-frequency loop
- *   for (...) {
- *       float positions[20] = {...};
- *       prohand_send_hand_streams(client, positions, 0.45, 0);
- *   }
+ * # Returns
+ * - ProHandResult::Success on success
+ * - ProHandResult::ErrorNull if handle or positions is null
+ * - ProHandResult::ErrorNotConnected if streaming endpoint was not provided at
+ * client creation
+ * - ProHandResult::ErrorOther on other errors
  */
-ProHandResult prohand_send_hand_streams(const ProHandClientHandle *handle,
-                                        const float *positions, float torque,
-                                        uint8_t velocity_saturation);
+enum ProHandResult
+prohand_send_hand_streams(const struct ProHandClientHandle *handle,
+                          const float *positions, float torque,
+                          uint8_t velocity_saturation);
 
 /**
- * Perform zero calibration on selected joints
+ * Send wrist command via REQ/REP command channel (wrist joint angles with
+ * velocities)
  *
- * This sets the current position of selected joints as the zero position.
+ * Uses the command socket (REQ/REP). For high-frequency commands, use
+ * prohand_send_wrist_streams() instead.
  *
- * @param handle Client handle
- * @param mask Array of 16 boolean values (0 or 1) indicating which joints to
- * calibrate
- * @return PROHAND_SUCCESS on success, error code on failure
- *
- * Example:
- *   int mask[16] = {1, 1, 1, 1, 0, 0, ...}; // Calibrate first 4 joints
- *   prohand_send_zero_calibration(client, mask);
+ * # Parameters
+ * - `positions`: Array of 2 floats (wrist joints) in radians
+ * - `use_profiler`: If true, runs the wrist motion profiler (position-only
+ * profiling, commands max velocity). Velocities are always implicit [1.0, 1.0].
  */
-ProHandResult prohand_send_zero_calibration(const ProHandClientHandle *handle,
-                                            const int *mask);
-
-/** Finger bitmask values for prohand_send_auto_calibration(). */
-#define PROHAND_CALIB_THUMB 0x01
-#define PROHAND_CALIB_INDEX 0x02
-#define PROHAND_CALIB_MIDDLE 0x04
-#define PROHAND_CALIB_RING 0x08
-#define PROHAND_CALIB_PINKY 0x10
-#define PROHAND_CALIB_ALL 0x1F
-#define PROHAND_CALIB_ABORT 0x00
+enum ProHandResult
+prohand_send_wrist_command(const struct ProHandClientHandle *handle,
+                           const float *positions, bool use_profiler);
 
 /**
- * Start or abort auto-calibration for the selected fingers
+ * Send wrist command via PUB/SUB streaming channel (wrist joint angles with
+ * velocities)
  *
- * Drives each selected finger against its hard stops to discover its range.
- * The hand must be unobstructed. Progress is reported on the status channel.
+ * Uses the streaming socket (PUB/SUB) for high-frequency commands.
+ * Requires: Client created with streaming endpoint AND driver in streaming
+ * mode.
  *
- * @param handle Client handle
- * @param finger_mask Bitwise OR of PROHAND_CALIB_* finger values.
- * PROHAND_CALIB_ABORT (0) aborts a running calibration.
- * @return PROHAND_SUCCESS on success, error code on failure
+ * # Parameters
+ * - `positions`: Array of 2 floats (wrist joints) in radians
+ * - `use_profiler`: If true, runs the wrist motion profiler (position-only
+ * profiling, commands max velocity). Velocities are always implicit [1.0, 1.0].
  *
- * Example:
- *   prohand_send_auto_calibration(client, PROHAND_CALIB_ALL);
- *   prohand_send_auto_calibration(client, PROHAND_CALIB_THUMB |
- *                                         PROHAND_CALIB_INDEX);
+ * # Returns
+ * - ProHandResult::Success on success
+ * - ProHandResult::ErrorNull if handle or positions is null
+ * - ProHandResult::ErrorNotConnected if streaming endpoint was not provided at
+ * client creation
+ * - ProHandResult::ErrorOther on other errors
  */
-ProHandResult prohand_send_auto_calibration(const ProHandClientHandle *handle,
-                                            uint8_t finger_mask);
-
-/**
- * Start or abort the homing sequence
- *
- * @param handle Client handle
- * @param enabled Non-zero starts homing, zero aborts it
- * @return PROHAND_SUCCESS on success, error code on failure
- */
-ProHandResult prohand_send_homing(const ProHandClientHandle *handle,
-                                  int enabled);
-
-/* ========================================================================== */
-/* USB DISCOVERY */
-/* ========================================================================== */
+enum ProHandResult
+prohand_send_wrist_streams(const struct ProHandClientHandle *handle,
+                           const float *positions, bool use_profiler);
 
 /**
  * Discover connected ProHand USB devices
  *
- * @param out_devices Output array to store device info
- * @param max_devices Maximum number of devices to return
- * @return Number of devices found, or negative error code
+ * # Parameters
+ * - `out_devices`: Output array to store device info
+ * - `max_devices`: Maximum number of devices to return
  *
- * Note: Call prohand_free_string() on serial_number and port_name for each
- * device.
- *
- * Example:
- *   ProHandUsbDeviceInfo devices[10];
- *   int count = prohand_discover_usb_devices(devices, 10);
- *   for (int i = 0; i < count; i++) {
- *       printf("Device: %s\n", devices[i].display_name);
- *       prohand_free_string((char*)devices[i].port_name);
- *       prohand_free_string((char*)devices[i].display_name);
- *   }
+ * # Returns
+ * Number of devices found, or negative error code
  */
-int prohand_discover_usb_devices(ProHandUsbDeviceInfo *out_devices,
+int prohand_discover_usb_devices(struct ProHandUsbDeviceInfo *out_devices,
                                  int max_devices);
 
 /**
  * Free a string allocated by the library
- *
- * @param s String pointer to free
  */
 void prohand_free_string(char *s);
-
-/* ========================================================================== */
-/* STATUS POLLING */
-/* ========================================================================== */
 
 /**
  * Try to receive status (non-blocking)
  *
- * @param handle Client handle
- * @param out_status Output structure to fill with status data
- * @return 1 if status was received, 0 if no status available, negative on error
+ * # Parameters
+ * - `out_status`: Output structure to fill with status data
  *
- * Example:
- *   ProHandStatusInfo status;
- *   if (prohand_try_recv_status(client, &status) > 0) {
- *       if (status.is_valid) {
- *           if (status.status_type == 1) {
- *               printf("Rotary position 0: %f rad\n",
- * status.rotary_positions[0]); } else if (status.status_type == 2) {
- *               printf("Linear position 0: %f rad\n",
- * status.linear_positions[0]);
- *           }
- *       }
- *   }
+ * # Returns
+ * 1 if status was received, 0 if no status available, negative on error
  */
-int prohand_try_recv_status(const ProHandClientHandle *handle,
-                            ProHandStatusInfo *out_status);
+int prohand_try_recv_status(const struct ProHandClientHandle *handle,
+                            struct ProHandStatusInfo *out_status);
 
 /**
  * Check if the driver is in Running state (streaming active)
  *
- * Polls the status channel and checks if RotaryState or LinearState
+ * This polls the status channel and checks if RotaryState or LinearState
  * is in Running mode, which indicates streaming is active.
  *
- * @param handle Client handle
- * @return 1 if in running state, 0 if not, negative on error
- *
- * Example:
- *   if (prohand_is_running_state(client)) {
- *       // Driver confirmed in Running state
- *       prohand_send_rotary_streams(client, positions, torques);
- *   }
+ * # Returns
+ * 1 if in running state, 0 if not, negative on error
  */
-int prohand_is_running_state(const ProHandClientHandle *handle);
-
-/* ========================================================================== */
-/* VERSION INFO */
-/* ========================================================================== */
+int prohand_is_running_state(const struct ProHandClientHandle *handle);
 
 /**
  * Get library version string
- *
- * @return Version string (do not free)
  */
 const char *prohand_get_version(void);
 
+/**
+ * Configure wrist motion limits (only active when motion-profiler feature is
+ * enabled)
+ */
+enum ProHandResult
+prohand_set_wrist_limits(const struct ProHandClientHandle *handle,
+                         const float *max_velocity,
+                         const float *max_acceleration, const float *max_jerk);
+
+/**
+ * Receive the next status message (non-blocking).
+ *
+ * Returns 1 when `out_message` was filled, 0 when nothing was queued, or a
+ * negative [`ProHandResult`] on error. Read `out_message->kind` first and touch
+ * only the payload arm it names.
+ */
+int prohand_try_recv_message(const struct ProHandClientHandle *handle,
+                             struct ProHandMessage *out_message);
+
+/**
+ * Report the size of every struct crossing the FFI boundary.
+ *
+ * A wrapper that declares the layout itself (Python ctypes) compares these at
+ * load time, so a dylib/wrapper mismatch fails immediately instead of silently
+ * misreading every field.
+ */
+int prohand_abi_sizes(struct ProHandAbiSizes *out_sizes);
+
 #ifdef __cplusplus
-}
-#endif
+} // extern "C"
+#endif // __cplusplus
 
 #endif /* PROHAND_SDK_H */

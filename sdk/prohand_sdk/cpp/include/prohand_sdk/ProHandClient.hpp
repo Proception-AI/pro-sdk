@@ -35,19 +35,46 @@ struct UsbDevice {
 };
 
 /**
- * Hand status information
+ * Rotary/linear positions and targets. Superseded by tryRecvMessage(), which
+ * covers every message kind the firmware publishes.
+ *
+ * Values are raw wire units, NOT radians: rotary counts are FT3950 encoder
+ * counts (0-4095, neutral 2048) and linear counts are 0.01 mm. An earlier
+ * version of this header converted them with a centidegree-to-radian factor,
+ * which is wrong for both — the wire never carried degrees.
+ *
+ * Only the vector matching statusType holds data on any given read; the others
+ * are zero.
  */
 struct HandStatus {
   bool isValid;
   // 0=other, 1=rotary status, 2=linear status, 3=rotary target, 4=linear target
   int statusType;
-  // Converted to radians from the raw centidegrees the C API reports. Only the
-  // vector matching statusType carries fresh data on any given read.
-  std::vector<float> rotaryPositions; // [16]
-  std::vector<float> linearPositions; // [2]
-  std::vector<float> rotaryTargets;   // [16]
-  std::vector<float> linearTargets;   // [2]
+  std::vector<int16_t> rotaryPositions; // [16] encoder counts
+  std::vector<int16_t> linearPositions; // [2]  0.01 mm
+  std::vector<int16_t> rotaryTargets;   // [16] encoder counts
+  std::vector<int16_t> linearTargets;   // [2]  0.01 mm
 };
+
+/**
+ * Scaling for the joint-space payloads, which are the only wire values carrying
+ * a real unit: CompactJointState packs position as 0.01 degrees and velocity or
+ * torque as a full-range int16.
+ */
+namespace joint_scale {
+constexpr float kCentidegToRad = 3.14159265358979323846f / 18000.0f;
+constexpr float kNormalized = 1.0f / 32767.0f;
+
+/// Joint position in radians from a packed CompactJointState.
+inline float toRadians(const CompactJointState &state) {
+  return static_cast<float>(state.scaled_position) * kCentidegToRad;
+}
+
+/// Normalized velocity or torque (-1.0..1.0) from a packed CompactJointState.
+inline float toNormalized(const CompactJointState &state) {
+  return static_cast<float>(state.normalized_vel_or_tau) * kNormalized;
+}
+} // namespace joint_scale
 
 /**
  * ProHand Client - RAII wrapper for ProHandClientHandle
@@ -527,7 +554,46 @@ public:
   }
 
   /**
-   * Try to receive status (non-blocking)
+   * Try to receive the next status message (non-blocking)
+   *
+   * Covers every message kind the firmware publishes. Switch on `kind` and read
+   * only the matching payload arm:
+   *
+   *   if (auto msg = client.tryRecvMessage()) {
+   *     switch (msg->kind) {
+   *       case PROHAND_MSG_ROTARY_GRP_STATUS:
+   *         use(msg->payload.rotary_status.servos);   // encoder counts
+   *         break;
+   *       case PROHAND_MSG_ROTARY_GRP_TARGET:
+   *         use(msg->payload.rotary_target.commands); // commanded counts
+   *         break;
+   *       case PROHAND_MSG_ALERT:
+   *         warn(msg->payload.alert);
+   *         break;
+   *     }
+   *   }
+   *
+   * @return ProHandMessage if available, nullopt otherwise
+   */
+  std::optional<ProHandMessage> tryRecvMessage() {
+    checkHandle();
+
+    ProHandMessage message;
+    int result = prohand_try_recv_message(handle_, &message);
+
+    if (result > 0) {
+      return message;
+    } else if (result == 0) {
+      return std::nullopt;
+    } else {
+      checkResult(result, "tryRecvMessage");
+      return std::nullopt; // Unreachable
+    }
+  }
+
+  /**
+   * Try to receive status (non-blocking) — rotary/linear positions and targets
+   * only, in raw wire units. Prefer tryRecvMessage().
    *
    * @return HandStatus if available, nullopt otherwise
    */
@@ -541,10 +607,14 @@ public:
       HandStatus status;
       status.isValid = statusInfo.is_valid != 0;
       status.statusType = statusInfo.status_type;
-      status.rotaryPositions = toRadians(statusInfo.rotary_positions, 16);
-      status.linearPositions = toRadians(statusInfo.linear_positions, 2);
-      status.rotaryTargets = toRadians(statusInfo.rotary_targets, 16);
-      status.linearTargets = toRadians(statusInfo.linear_targets, 2);
+      status.rotaryPositions.assign(statusInfo.rotary_positions,
+                                    statusInfo.rotary_positions + 16);
+      status.linearPositions.assign(statusInfo.linear_positions,
+                                    statusInfo.linear_positions + 2);
+      status.rotaryTargets.assign(statusInfo.rotary_targets,
+                                  statusInfo.rotary_targets + 16);
+      status.linearTargets.assign(statusInfo.linear_targets,
+                                  statusInfo.linear_targets + 2);
       return status;
     } else if (result == 0) {
       return std::nullopt;

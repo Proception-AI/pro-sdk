@@ -144,6 +144,26 @@ typedef struct {
 } ProGloveImuStatus;
 
 /**
+ * Tunable tactile filter parameters - deadzone sensitivity, stuck-pixel
+ * spatial-isolation threshold, and stuck-detection timing. Fetch sensible
+ * starting values with proglove_get_default_filter_config(), tweak only the
+ * fields you care about, then apply with proglove_set_filter_config() - the
+ * underlying command replaces the whole config, not a per-field patch.
+ */
+typedef struct {
+  float deadzone_on;   /* Fraction of ADC max above which a taxel activates
+                          (0.0-1.0) */
+  float deadzone_off;  /* Fraction of ADC max below which an active taxel turns
+                          off (0.0-1.0) */
+  int denoise_enabled; /* Stuck-pixel masking on/off */
+  unsigned short stuck_spatial_threshold; /* Raw ADC counts a taxel must exceed
+                                              its segment neighbors' median by
+                                              to count as spatially isolated */
+  unsigned int stuck_streak_on_frames;    /* Consecutive flat+isolated frames
+                                              before flagging stuck, at ~100 Hz */
+} ProGloveFilterConfig;
+
+/**
  * Called after each OTA page is flashed, with the running page count and
  * the total page count, so callers can drive a progress bar. `user_data` is
  * passed through unchanged from proglove_perform_ota() - use it for a
@@ -241,7 +261,7 @@ int proglove_calibrate_and_wait(const ProGloveClientHandle *handle,
                                 unsigned int timeout_ms);
 
 /**
- * Toggle the median pre-filter + stuck-pixel masking together.
+ * Toggle stuck-pixel masking.
  *
  * @param handle Client handle
  * @param enabled Non-zero to enable, zero to disable
@@ -250,14 +270,20 @@ ProGloveResult proglove_set_denoise_enabled(const ProGloveClientHandle *handle,
                                             int enabled);
 
 /**
- * Toggle the whole tactile filter pipeline (baseline subtraction, EMA,
- * deadzone, denoise). Disabling gives fully raw, unfiltered taxel values.
+ * Fill `out` with the default filter configuration.
+ *
+ * @param out Non-null pointer to a ProGloveFilterConfig to populate
+ */
+ProGloveResult proglove_get_default_filter_config(ProGloveFilterConfig *out);
+
+/**
+ * Replace the driver's entire tactile filter configuration.
  *
  * @param handle Client handle
- * @param enabled Non-zero to enable, zero to disable
+ * @param config Non-null pointer to the desired configuration
  */
-ProGloveResult proglove_set_filter_enabled(const ProGloveClientHandle *handle,
-                                           int enabled);
+ProGloveResult proglove_set_filter_config(const ProGloveClientHandle *handle,
+                                          const ProGloveFilterConfig *config);
 
 /* ========================================================================== */
 /* USB DISCOVERY */

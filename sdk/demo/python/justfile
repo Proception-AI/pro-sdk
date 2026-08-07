@@ -47,6 +47,12 @@ command-matrix *args:
 debug-streaming *args:
     cd src && python3 -m prohand_demo.debug_streaming {{ args }}
 
+# Needs the rerun extra: `uv pip install rerun-sdk` (or `uv sync --extra rerun`).
+# Auto-starts the hand driver in a tmux session if none is running (--no-launch to attach instead).
+# Log rotary/linear feedback + firmware target echo to Rerun while streaming a curl: rerun-hand [options]
+rerun-hand *args:
+    cd src && python3 -m prohand_demo.rerun_log {{ args }}
+
 # Run connect-glove demo: connect-glove left|right [options] OR connect-glove --status-endpoint <endpoint>
 connect-glove +args:
     #!/usr/bin/env bash

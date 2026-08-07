@@ -3,10 +3,10 @@
 ProGlove SDK Demo: Filter Control
 
 Demonstrates toggling the host-side tactile filter via
-GloveIpcClient.set_denoise_enabled() / set_filter_enabled(), and shows the
-effect on a live taxel value: filter enabled applies baseline subtraction +
-EMA smoothing + deadzone hysteresis (+ denoise if on); disabling the whole
-pipeline gives fully raw ADC values.
+GloveIpcClient.set_denoise_enabled(), and shows the effect on a live taxel
+value. There is no whole-pipeline disable — subscribe to the driver's
+secondary raw PUB node (`-raw.ipc`) instead for fully unfiltered ADC values,
+without disrupting every other subscriber on the main filtered endpoint.
 """
 
 import sys
@@ -49,24 +49,16 @@ class FilterControlDemo(DemoBase):
             self.success("Connected!")
 
             self.section(
-                "Filter enabled (default): baseline + EMA + deadzone + denoise"
+                "Filter enabled (default): baseline + deadzone + stuck-pixel masking"
             )
             self._sample(client, taxel_index, hold_seconds)
 
-            self.section("Disabling denoise (median pre-filter + stuck-pixel masking)")
+            self.section("Disabling denoise (stuck-pixel masking)")
             client.set_denoise_enabled(False)
             self._sample(client, taxel_index, hold_seconds)
 
             self.section("Re-enabling denoise")
             client.set_denoise_enabled(True)
-            self._sample(client, taxel_index, hold_seconds)
-
-            self.section("Disabling whole filter pipeline: fully raw ADC values")
-            client.set_filter_enabled(False)
-            self._sample(client, taxel_index, hold_seconds)
-
-            self.section("Re-enabling whole filter pipeline")
-            client.set_filter_enabled(True)
             self._sample(client, taxel_index, hold_seconds)
 
             self.success("Filter control demo completed!")

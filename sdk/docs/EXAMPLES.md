@@ -436,10 +436,10 @@ enabled. Check, in order:
 1. Is the driver running, and did it claim the USB device? A second driver holding
    the device makes the first fail with an access error while its sockets still
    bind — so a client connects happily to a driver with no hand behind it.
-2. Do your endpoints match the driver's? A driver started with a node prefix binds
+1. Do your endpoints match the driver's? A driver started with a node prefix binds
    e.g. `/tmp/right-commands.ipc`, not `/tmp/prohand-commands.ipc`.
-3. Did `wait_for_streaming_ready()` return `True`?
-4. Is the motion inside the servo envelope? See `velocity_saturation` above.
+1. Did `wait_for_streaming_ready()` return `True`?
+1. Is the motion inside the servo envelope? See `velocity_saturation` above.
 
 ### Connection issues
 

@@ -192,12 +192,17 @@ or the timeout elapses. Requires streaming to be on.
 
 #### `ProGloveClient.set_denoise_enabled(enabled: bool) -> None`
 
-Toggle the median pre-filter + stuck-pixel masking together.
+Toggle stuck-pixel masking.
 
-#### `ProGloveClient.set_filter_enabled(enabled: bool) -> None`
+#### `get_default_filter_config() -> ProGloveFilterConfig` / `ProGloveClient.set_filter_config(config: ProGloveFilterConfig) -> None`
 
-Toggle the whole tactile filter pipeline (baseline subtraction, EMA,
-deadzone, denoise). Disabling gives fully raw, unfiltered taxel values.
+Fetch sensible starting values, tweak `deadzone_on`/`deadzone_off`/
+`stuck_spatial_threshold`/`stuck_streak_on_frames`, then apply. Replaces the
+whole config, not a per-field patch.
+
+There is no whole-pipeline enable/disable — subscribe to the driver's
+secondary raw PUB node (`-raw.ipc`) instead for fully unfiltered ADC values,
+without disrupting every other subscriber on the main filtered endpoint.
 
 #### `ProGloveClient.perform_ota(image: bytes, key: bytes, sig: bytes, on_progress=None, timeout: float = 15.0) -> bool`
 
@@ -214,7 +219,7 @@ currently unenforced firmware-side).
 - RAII-style resource management
 - Exception-based error handling
 - High-level methods: `sendPing()`, `tryRecvStatus()`, `tryRecvImuStatus()`,
-  `calibrate()`, `setDenoiseEnabled()`, `setFilterEnabled()`, `performOta()`
+  `calibrate()`, `setDenoiseEnabled()`, `setFilterConfig()`, `performOta()`
   (takes a `std::function` progress callback), etc.
 - See `cpp/include/proglove_sdk/ProGloveClient.hpp` for full API
 

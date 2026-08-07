@@ -1,0 +1,24 @@
+# Tool pins for the Proception SDK.
+#
+# PUBLIC FILE. Copied verbatim to public/pro-sdk/sdk/mise.toml by the [[file]]
+# entry in publish.toml, so it MUST stay self-contained: no `vars.monorepo_root`,
+# no `[task_config] includes` of monorepo paths, nothing that resolves only
+# inside this repo. A customer runs `mise install` here and can build and run
+# everything below this directory.
+#
+# Not to be confused with the per-package mise.toml/tasks.toml under */python:
+# those are monorepo CI wiring (they include ci/python.toml) and are excluded
+# from the release by apply-publish-manifest.sh.
+#
+# Pins only, no tasks. The SDK's command surface is the shipped justfile —
+# duplicating it here would hand customers two ways to do the same thing.
+#
+# NOTE: sitting at hand-rt/sdk/, this file is also part of the monorepo's mise
+# hierarchy, so these pins apply to the internal SDK subtree too. Verified not to
+# change task resolution for the */python packages below it.
+[tools]
+python = "3.12.13" # SDK packages declare >=3.8; matches the monorepo pin
+uv = "0.11.26"     # installs the Python SDKs from the shipped uv.lock
+just = "1.57.0"    # runs sdk/justfile and demo/*/justfile
+cmake = "4.1.2"    # demo/cpp needs >=3.16, C++17
+ninja = "1.13.2"   # generator for the C++ demos

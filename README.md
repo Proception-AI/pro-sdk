@@ -3,7 +3,7 @@
 Official SDK and drivers for the **ProHand** robotic hand, the **ProGlove**
 tactile sensing glove, and the **ProWristCam**.
 
-**Current Version**: 0.3.3.0
+**Current Version**: 0.3.4.0
 
 The SDK is a C FFI dynamic library (`cdylib`) with ready-to-use **Python**
 (`ctypes`) and **C++** bindings. Your application talks to a small headless
@@ -201,7 +201,7 @@ with WristCamClient("ipc:///tmp/prowristcam-stream.ipc") as cam:
 
 ### ProGlove (`ProGloveClient`)
 
-- `send_ping()`, `calibrate()`, `set_denoise_enabled()`, `set_filter_enabled()`,
+- `send_ping()`, `calibrate()`, `set_denoise_enabled()`, `set_filter_config()`,
   `perform_ota(...)`
 - `try_recv_status()` → `TactileStatus` (100 taxels by finger segment
   DIP/PIP/MCP + upper/middle/lower palm)
@@ -245,7 +245,7 @@ Versions are tracked with git tags:
 
 ```bash
 git tag -l              # list versions
-git checkout 0.3.3.0    # check out a specific release
+git checkout 0.3.4.0    # check out a specific release
 ```
 
 ## Platform Support

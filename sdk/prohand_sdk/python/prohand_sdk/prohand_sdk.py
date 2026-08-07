@@ -53,13 +53,17 @@ import os
 import sys
 from ctypes import (
     POINTER,
+    Union as CUnion,
     c_char,
     c_char_p,
     c_int,
+    c_int32,
     c_float,
     c_short,
     c_bool,
     c_uint8,
+    c_uint16,
+    c_uint32,
     c_uint64,
     Structure,
     byref,
@@ -200,6 +204,407 @@ class ProHandStatusInfo(Structure):
     ]
 
 
+# ============================================================================
+# STATUS MESSAGES — ctypes mirrors of the prohand-messages wire structs
+#
+# These layouts must match the Rust `repr(C)` structs exactly. `_check_abi()`
+# below verifies that against the loaded library at import time, so a wrapper
+# built against a different dylib fails loudly instead of misreading fields.
+# ============================================================================
+
+ROTARY_COUNT = 16
+LINEAR_COUNT = 2
+JOINT_COUNT = 20
+WRIST_JOINT_COUNT = 2
+
+
+class MessageKind(IntEnum):
+    """Wire discriminant of `ProHandStatus`. Values are the protocol's, not ours."""
+
+    NONE = -1
+    PONG = 0
+    HAND_REQUEST_ECHO = 1
+    ROTARY_STATE = 2
+    LINEAR_STATE = 3
+    HAND_STATE = 4
+    ROTARY_GRP_STATUS = 5
+    LINEAR_GRP_STATUS = 6
+    ROTARY_GRP_TARGET = 7
+    LINEAR_GRP_TARGET = 8
+    HANDEDNESS = 9
+    IMU_STATUS = 10
+    IMU_STATE = 11
+    TIME_SYNC_ACK = 12
+    ALERT = 13
+    CURRENT_SENSE_STATUS = 14
+    CURRENT_SENSE_STATE = 15
+    HAND_JOINT_TARGET = 16
+    WRIST_JOINT_TARGET = 17
+    HAND_JOINT_STATUS = 18
+    WRIST_JOINT_STATUS = 19
+    # Service side — reported by kind, payload not exposed here.
+    ROTARY_SRV_STATUS = 100
+    LINEAR_SRV_STATUS = 101
+    OTA_STATUS = 102
+    METADATA = 103
+    CALIBRATION_RAMP_SAMPLE = 104
+    CALIBRATION_TRIM = 105
+    CALIBRATION_PROGRESS = 106
+    POSITION_CORRECTION_SNAPSHOT = 107
+    TX_DROP_REPORT = 108
+    IMU_TUNING_CONFIG = 109
+    IDENTITY_RESPONSE = 110
+
+
+class AlertSource(IntEnum):
+    HAND = 1
+    ROTARY = 2
+    LINEAR = 4
+    CALIBRATION = 8
+    IMU = 16
+    SYSTEM = 32
+
+
+class AlertSeverity(IntEnum):
+    INFO = 0
+    WARNING = 1
+    ERROR = 2
+
+
+class ThermalEvent(IntEnum):
+    NONE = 0
+    WARNING = 1
+    PROTECTION = 2
+    RECOVERED = 3
+
+
+class Handedness(IntEnum):
+    UNKNOWN = 0
+    LEFT = 1
+    RIGHT = 2
+
+
+class _RotaryStatusC(Structure):
+    _fields_ = [
+        ("position", c_short),
+        ("velocity", c_short),
+        ("torque", c_uint16),
+        ("temperature", c_uint8),
+        ("voltage", c_uint8),
+    ]
+
+
+class _RotaryCommandC(Structure):
+    _fields_ = [("position", c_short), ("torque", c_uint16), ("velocity", c_uint8)]
+
+
+class _RotaryStatusStampedC(Structure):
+    _fields_ = [("timestamp_ms", c_uint32), ("servos", _RotaryStatusC * ROTARY_COUNT)]
+
+
+class _RotaryTargetStampedC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("commands", _RotaryCommandC * ROTARY_COUNT),
+    ]
+
+
+class _LinearStatusC(Structure):
+    _fields_ = [
+        ("position", c_short),
+        ("current", c_short),
+        ("speed", c_short),
+        ("error", c_uint16),
+        ("temp", c_short),
+    ]
+
+
+class _LinearCommandC(Structure):
+    _fields_ = [("position", c_short), ("speed", c_uint16), ("torque", c_uint8)]
+
+
+class _LinearStatusStampedC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("actuators", _LinearStatusC * LINEAR_COUNT),
+    ]
+
+
+class _LinearTargetStampedC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("commands", _LinearCommandC * LINEAR_COUNT),
+    ]
+
+
+class _CompactJointStateC(Structure):
+    """Wire-packed joint state: 0.01° position, i16-normalized velocity/torque."""
+
+    _fields_ = [("scaled_position", c_short), ("normalized_vel_or_tau", c_short)]
+
+
+class _HandCommandC(Structure):
+    _fields_ = [
+        ("sequence", c_uint16),
+        ("uid", c_uint16),
+        ("thumb", _CompactJointStateC * 4),
+        ("index", _CompactJointStateC * 4),
+        ("middle", _CompactJointStateC * 4),
+        ("ring", _CompactJointStateC * 4),
+        ("pinky", _CompactJointStateC * 4),
+        ("velocity_saturation", c_uint8),
+    ]
+
+
+class _WristCommandC(Structure):
+    _fields_ = [
+        ("sequence", c_uint16),
+        ("uid", c_uint16),
+        ("wrist", _CompactJointStateC * WRIST_JOINT_COUNT),
+    ]
+
+
+class _HandJointTargetStampedC(Structure):
+    _fields_ = [("timestamp_ms", c_uint32), ("command", _HandCommandC)]
+
+
+class _HandJointStatusStampedC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("thumb", _CompactJointStateC * 4),
+        ("index", _CompactJointStateC * 4),
+        ("middle", _CompactJointStateC * 4),
+        ("ring", _CompactJointStateC * 4),
+        ("pinky", _CompactJointStateC * 4),
+    ]
+
+
+class _WristJointTargetStampedC(Structure):
+    _fields_ = [("timestamp_ms", c_uint32), ("command", _WristCommandC)]
+
+
+class _WristJointStatusStampedC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("wrist", _CompactJointStateC * WRIST_JOINT_COUNT),
+    ]
+
+
+class _ImuStatusC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("temp", c_float),
+        ("accel_x", c_float),
+        ("accel_y", c_float),
+        ("accel_z", c_float),
+        ("gyro_x", c_float),
+        ("gyro_y", c_float),
+        ("gyro_z", c_float),
+        ("qw", c_float),
+        ("qx", c_float),
+        ("qy", c_float),
+        ("qz", c_float),
+    ]
+
+
+class _CurrentSenseStatusC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("bus_voltage_mv", c_uint16),
+        ("shunt_uv", ctypes.c_int32),
+        ("current_ma", c_short),
+        ("power_mw", c_uint16),
+    ]
+
+
+class _AlertC(Structure):
+    _fields_ = [
+        ("timestamp_ms", c_uint32),
+        ("source", c_uint8),
+        ("severity", c_uint8),
+        ("code", c_uint16),
+        ("actuator", c_uint8),
+        ("detail", c_uint16),
+        ("thermal_event", c_uint8),
+    ]
+
+
+class _StateInfoC(Structure):
+    _fields_ = [("code", c_uint8), ("_pad", c_uint8), ("detail", c_uint16)]
+
+
+class _MessagePayloadC(CUnion):
+    _fields_ = [
+        ("rotary_status", _RotaryStatusStampedC),
+        ("rotary_target", _RotaryTargetStampedC),
+        ("linear_status", _LinearStatusStampedC),
+        ("linear_target", _LinearTargetStampedC),
+        ("hand_joint_target", _HandJointTargetStampedC),
+        ("hand_joint_status", _HandJointStatusStampedC),
+        ("wrist_joint_target", _WristJointTargetStampedC),
+        ("wrist_joint_status", _WristJointStatusStampedC),
+        ("imu", _ImuStatusC),
+        ("power", _CurrentSenseStatusC),
+        ("alert", _AlertC),
+        ("state", _StateInfoC),
+        ("handedness", c_uint8),
+        ("raw", c_uint8 * 168),
+    ]
+
+
+class ProHandMessageC(Structure):
+    """Raw FFI message. Use `ProHandClient.try_recv_message()` for typed frames."""
+
+    _fields_ = [
+        ("kind", c_int32),
+        ("timestamp_ms", c_uint32),
+        ("payload", _MessagePayloadC),
+    ]
+
+
+class ProHandAbiSizes(Structure):
+    _fields_ = [
+        ("message", c_uint32),
+        ("payload", c_uint32),
+        ("rotary_status_stamped", c_uint32),
+        ("rotary_target_stamped", c_uint32),
+        ("linear_status_stamped", c_uint32),
+        ("linear_target_stamped", c_uint32),
+        ("hand_joint_target_stamped", c_uint32),
+        ("hand_joint_status_stamped", c_uint32),
+        ("wrist_joint_target_stamped", c_uint32),
+        ("wrist_joint_status_stamped", c_uint32),
+        ("imu_status", c_uint32),
+        ("current_sense_status", c_uint32),
+        ("alert", c_uint32),
+        ("state_info", c_uint32),
+        ("status_info", c_uint32),
+    ]
+
+
+# ============================================================================
+# TYPED FRAMES — one class per message kind, so no field can be misread
+# ============================================================================
+
+# Wire scaling: CompactJointState packs position as 0.01° and velocity/torque
+# as a full-range i16. Converted here, once, for every Python consumer.
+_CENTIDEG_TO_RAD = 3.141592653589793 / 18000.0
+_NORMALIZED_SCALE = 1.0 / 32767.0
+
+
+@dataclass
+class RotaryStatusFrame:
+    """Rotary servo feedback. Positions are raw FT3950 counts (0–4095, neutral 2048)."""
+
+    timestamp_ms: int
+    positions: List[int]
+    velocities: List[int]
+    torques: List[int]  # 0–1000
+    temperatures_c: List[int]
+    voltages: List[int]  # 0.1 V units
+
+
+@dataclass
+class RotaryTargetFrame:
+    """Commanded rotary targets, as applied to the bus. Counts, torque cap, velocity cap."""
+
+    timestamp_ms: int
+    positions: List[int]
+    torque_caps: List[int]
+    velocity_caps: List[int]
+
+
+@dataclass
+class LinearStatusFrame:
+    """Linear actuator feedback. Positions in 0.01 mm."""
+
+    timestamp_ms: int
+    positions: List[int]
+    currents_ma: List[int]
+    speeds: List[int]
+    errors: List[int]
+    temperatures_c: List[int]
+
+
+@dataclass
+class LinearTargetFrame:
+    timestamp_ms: int
+    positions: List[int]
+    speed_caps: List[int]
+
+
+@dataclass
+class JointFrame:
+    """Joint-space frame in real units: radians, plus normalized velocity/torque.
+
+    `is_target` distinguishes the firmware's echo of an accepted command from its
+    forward-kinematics feedback. `sequence`/`uid`/`velocity_saturation` are zero on
+    a feedback frame.
+    """
+
+    timestamp_ms: int
+    positions_rad: List[float]
+    vel_or_tau: List[float]
+    is_target: bool
+    is_wrist: bool
+    sequence: int = 0
+    uid: int = 0
+    velocity_saturation: int = 0
+
+
+@dataclass
+class ImuFrame:
+    timestamp_ms: int
+    accel_mps2: List[float]
+    gyro_rps: List[float]
+    quaternion_wxyz: List[float]
+    temperature_c: float
+
+
+@dataclass
+class PowerFrame:
+    timestamp_ms: int
+    bus_voltage_mv: int
+    shunt_uv: int
+    current_ma: int
+    power_mw: int
+
+
+@dataclass
+class AlertFrame:
+    """Firmware warning. Interpret `code` by `source` — see the SDK README."""
+
+    timestamp_ms: int
+    source: AlertSource
+    severity: AlertSeverity
+    code: int
+    detail: int
+    actuator: Optional[int]  # None when not actuator-specific
+    thermal_event: ThermalEvent
+
+
+@dataclass
+class StateFrame:
+    """Subsystem state transition: rotary, linear, hand, IMU or current sense."""
+
+    kind: MessageKind
+    code: int
+    detail: int
+
+
+@dataclass
+class HandednessFrame:
+    handedness: Handedness
+
+
+@dataclass
+class OtherFrame:
+    """A kind the typed API does not decode — service replies, clock sync, echoes."""
+
+    kind: MessageKind
+    timestamp_ms: int
+
+
 @dataclass
 class UsbDevice:
     """Python-friendly USB device info"""
@@ -210,14 +615,21 @@ class UsbDevice:
 
 @dataclass
 class HandStatus:
-    """Python-friendly hand status"""
+    """Rotary/linear positions and targets. Superseded by the typed frames from
+    ProHandClient.try_recv_message(), which cover every message kind.
+
+    Only the list matching `status_type` holds data on any given read; the others
+    are zero. Values are raw wire units, not degrees.
+    """
 
     is_valid: bool
-    status_type: int  # 0=unknown, 1=rotary, 2=linear
-    rotary_positions: List[int]  # raw i16, 0.01 degree precision (actual)
-    linear_positions: List[int]  # raw i16, 0.01 degree precision (actual)
-    rotary_targets: List[int]  # raw i16, 0.01 degree precision (commanded)
-    linear_targets: List[int]  # raw i16, 0.01 degree precision (commanded)
+    status_type: (
+        int  # 1=rotary status, 2=linear status, 3=rotary target, 4=linear target
+    )
+    rotary_positions: List[int]  # FT3950 encoder counts, 0–4095 (neutral 2048)
+    linear_positions: List[int]  # 0.01 mm stroke counts
+    rotary_targets: List[int]  # commanded encoder counts
+    linear_targets: List[int]  # commanded 0.01 mm counts
 
 
 # ============================================================================
@@ -340,6 +752,21 @@ _lib.prohand_free_string.argtypes = [POINTER(c_char)]
 _lib.prohand_free_string.restype = None
 
 # Status polling
+try:
+    _lib.prohand_try_recv_message.argtypes = [
+        POINTER(ProHandClientHandle),
+        POINTER(ProHandMessageC),
+    ]
+    _lib.prohand_try_recv_message.restype = c_int
+
+    _lib.prohand_abi_sizes.argtypes = [POINTER(ProHandAbiSizes)]
+    _lib.prohand_abi_sizes.restype = c_int
+except AttributeError as e:
+    raise RuntimeError(
+        f"{_lib_path} predates this wrapper — it has no {e.name}. "
+        "Rebuild the SDK: just crates hand-client-sdk build-sdk"
+    ) from e
+
 _lib.prohand_try_recv_status.argtypes = [
     POINTER(ProHandClientHandle),
     POINTER(ProHandStatusInfo),
@@ -375,6 +802,209 @@ class InvalidArgumentError(ProHandError):
     """Invalid argument errors"""
 
     pass
+
+
+def _check_abi() -> None:
+    """Verify the ctypes layouts above against the loaded library.
+
+    The layouts are declared twice — here and in Rust — so a wrapper paired with a
+    different dylib would silently misread every field. The library reports its
+    own sizes; a mismatch raises at import instead.
+    """
+    sizes = ProHandAbiSizes()
+    if _lib.prohand_abi_sizes(byref(sizes)) != ProHandResult.SUCCESS:
+        raise RuntimeError("prohand_abi_sizes failed")
+
+    expected = {
+        "message": ProHandMessageC,
+        "payload": _MessagePayloadC,
+        "rotary_status_stamped": _RotaryStatusStampedC,
+        "rotary_target_stamped": _RotaryTargetStampedC,
+        "linear_status_stamped": _LinearStatusStampedC,
+        "linear_target_stamped": _LinearTargetStampedC,
+        "hand_joint_target_stamped": _HandJointTargetStampedC,
+        "hand_joint_status_stamped": _HandJointStatusStampedC,
+        "wrist_joint_target_stamped": _WristJointTargetStampedC,
+        "wrist_joint_status_stamped": _WristJointStatusStampedC,
+        "imu_status": _ImuStatusC,
+        "current_sense_status": _CurrentSenseStatusC,
+        "alert": _AlertC,
+        "state_info": _StateInfoC,
+        "status_info": ProHandStatusInfo,
+    }
+    mismatches = [
+        f"{name}: library {getattr(sizes, name)} != wrapper {ctypes.sizeof(struct)}"
+        for name, struct in expected.items()
+        if getattr(sizes, name) != ctypes.sizeof(struct)
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "ProHand SDK ABI mismatch between this wrapper and "
+            f"{_lib_path} — rebuild both:\n  " + "\n  ".join(mismatches)
+        )
+
+
+_check_abi()
+
+
+def _joints_to_rad(states) -> tuple:
+    """(positions_rad, vel_or_tau) from a sequence of packed CompactJointStates."""
+    return (
+        [state.scaled_position * _CENTIDEG_TO_RAD for state in states],
+        [state.normalized_vel_or_tau * _NORMALIZED_SCALE for state in states],
+    )
+
+
+def _decode_message(message: ProHandMessageC):
+    """Turn a raw FFI message into the typed frame for its kind."""
+    kind = MessageKind(message.kind)
+    payload = message.payload
+
+    if kind == MessageKind.ROTARY_GRP_STATUS:
+        servos = payload.rotary_status.servos
+        return RotaryStatusFrame(
+            timestamp_ms=payload.rotary_status.timestamp_ms,
+            positions=[s.position for s in servos],
+            velocities=[s.velocity for s in servos],
+            torques=[s.torque for s in servos],
+            temperatures_c=[s.temperature for s in servos],
+            voltages=[s.voltage for s in servos],
+        )
+    if kind == MessageKind.ROTARY_GRP_TARGET:
+        commands = payload.rotary_target.commands
+        return RotaryTargetFrame(
+            timestamp_ms=payload.rotary_target.timestamp_ms,
+            positions=[c.position for c in commands],
+            torque_caps=[c.torque for c in commands],
+            velocity_caps=[c.velocity for c in commands],
+        )
+    if kind == MessageKind.LINEAR_GRP_STATUS:
+        actuators = payload.linear_status.actuators
+        return LinearStatusFrame(
+            timestamp_ms=payload.linear_status.timestamp_ms,
+            positions=[a.position for a in actuators],
+            currents_ma=[a.current for a in actuators],
+            speeds=[a.speed for a in actuators],
+            errors=[a.error for a in actuators],
+            temperatures_c=[a.temp for a in actuators],
+        )
+    if kind == MessageKind.LINEAR_GRP_TARGET:
+        commands = payload.linear_target.commands
+        return LinearTargetFrame(
+            timestamp_ms=payload.linear_target.timestamp_ms,
+            positions=[c.position for c in commands],
+            speed_caps=[c.speed for c in commands],
+        )
+    if kind == MessageKind.HAND_JOINT_TARGET:
+        command = payload.hand_joint_target.command
+        states = [
+            state
+            for finger in (
+                command.thumb,
+                command.index,
+                command.middle,
+                command.ring,
+                command.pinky,
+            )
+            for state in finger
+        ]
+        positions, vel_or_tau = _joints_to_rad(states)
+        return JointFrame(
+            timestamp_ms=payload.hand_joint_target.timestamp_ms,
+            positions_rad=positions,
+            vel_or_tau=vel_or_tau,
+            is_target=True,
+            is_wrist=False,
+            sequence=command.sequence,
+            uid=command.uid,
+            velocity_saturation=command.velocity_saturation,
+        )
+    if kind == MessageKind.HAND_JOINT_STATUS:
+        status = payload.hand_joint_status
+        states = [
+            state
+            for finger in (
+                status.thumb,
+                status.index,
+                status.middle,
+                status.ring,
+                status.pinky,
+            )
+            for state in finger
+        ]
+        positions, vel_or_tau = _joints_to_rad(states)
+        return JointFrame(
+            timestamp_ms=status.timestamp_ms,
+            positions_rad=positions,
+            vel_or_tau=vel_or_tau,
+            is_target=False,
+            is_wrist=False,
+        )
+    if kind == MessageKind.WRIST_JOINT_TARGET:
+        command = payload.wrist_joint_target.command
+        positions, vel_or_tau = _joints_to_rad(command.wrist)
+        return JointFrame(
+            timestamp_ms=payload.wrist_joint_target.timestamp_ms,
+            positions_rad=positions,
+            vel_or_tau=vel_or_tau,
+            is_target=True,
+            is_wrist=True,
+            sequence=command.sequence,
+            uid=command.uid,
+        )
+    if kind == MessageKind.WRIST_JOINT_STATUS:
+        status = payload.wrist_joint_status
+        positions, vel_or_tau = _joints_to_rad(status.wrist)
+        return JointFrame(
+            timestamp_ms=status.timestamp_ms,
+            positions_rad=positions,
+            vel_or_tau=vel_or_tau,
+            is_target=False,
+            is_wrist=True,
+        )
+    if kind == MessageKind.IMU_STATUS:
+        imu = payload.imu
+        return ImuFrame(
+            timestamp_ms=imu.timestamp_ms,
+            accel_mps2=[imu.accel_x, imu.accel_y, imu.accel_z],
+            gyro_rps=[imu.gyro_x, imu.gyro_y, imu.gyro_z],
+            quaternion_wxyz=[imu.qw, imu.qx, imu.qy, imu.qz],
+            temperature_c=imu.temp,
+        )
+    if kind == MessageKind.CURRENT_SENSE_STATUS:
+        power = payload.power
+        return PowerFrame(
+            timestamp_ms=power.timestamp_ms,
+            bus_voltage_mv=power.bus_voltage_mv,
+            shunt_uv=power.shunt_uv,
+            current_ma=power.current_ma,
+            power_mw=power.power_mw,
+        )
+    if kind == MessageKind.ALERT:
+        alert = payload.alert
+        return AlertFrame(
+            timestamp_ms=alert.timestamp_ms,
+            source=AlertSource(alert.source),
+            severity=AlertSeverity(alert.severity),
+            code=alert.code,
+            detail=alert.detail,
+            actuator=None if alert.actuator == 0xFF else alert.actuator,
+            thermal_event=ThermalEvent(alert.thermal_event),
+        )
+    if kind in (
+        MessageKind.ROTARY_STATE,
+        MessageKind.LINEAR_STATE,
+        MessageKind.HAND_STATE,
+        MessageKind.IMU_STATE,
+        MessageKind.CURRENT_SENSE_STATE,
+    ):
+        return StateFrame(
+            kind=kind, code=payload.state.code, detail=payload.state.detail
+        )
+    if kind == MessageKind.HANDEDNESS:
+        return HandednessFrame(handedness=Handedness(payload.handedness))
+
+    return OtherFrame(kind=kind, timestamp_ms=message.timestamp_ms)
 
 
 def _check_result(result: int, operation: str = "operation"):
@@ -875,9 +1505,52 @@ class ProHandClient:
     # STATUS POLLING
     # ========================================================================
 
+    def try_recv_message(self):
+        """
+        Try to receive the next status message (non-blocking).
+
+        Returns a typed frame for the message's kind, or None when nothing is
+        queued. Every message the firmware publishes reaches you here — actuator
+        feedback and targets, joint-space targets in radians, IMU, power,
+        warnings, state transitions and handedness — so there are no fields
+        belonging to a different kind to misread.
+
+        Shares one queue with try_recv_status(): each message goes to whichever is
+        called first, so use one or the other per client.
+
+        Returns:
+            RotaryStatusFrame | RotaryTargetFrame | LinearStatusFrame |
+            LinearTargetFrame | JointFrame | ImuFrame | PowerFrame | AlertFrame |
+            StateFrame | HandednessFrame | OtherFrame | None
+
+        Example:
+            while (frame := client.try_recv_message()) is not None:
+                if isinstance(frame, RotaryStatusFrame):
+                    print(frame.positions)      # raw encoder counts
+                elif isinstance(frame, RotaryTargetFrame):
+                    print(frame.positions)      # commanded counts
+                elif isinstance(frame, AlertFrame):
+                    print(frame.severity, frame.code)
+        """
+        message = ProHandMessageC()
+        result = _lib.prohand_try_recv_message(self._handle, byref(message))
+        if result > 0:
+            return _decode_message(message)
+        if result == 0:
+            return None
+        _check_result(result, "try_recv_message")
+        return None
+
     def try_recv_status(self) -> Optional[HandStatus]:
         """
-        Try to receive status (non-blocking)
+        Try to receive status (non-blocking) — rotary/linear positions and targets only.
+
+        Superseded by try_recv_message(), which covers every message kind. Kept for
+        existing callers.
+
+        One kind per call: `status_type` says which array was filled and the others
+        are zero. Reading `rotary_targets` off a `status_type == 1` frame yields
+        zeroes — that is this struct's shape, not a missing target echo.
 
         Returns:
             HandStatus if available, None otherwise

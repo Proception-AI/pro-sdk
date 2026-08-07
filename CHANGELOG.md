@@ -18,6 +18,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.4.0] - 2026-08-06
+
+SDK 0.3.4.0 · firmware 0.9.1.0 · macOS app 0.3.4.0
+
+### Added
+- Typed status frames for the hand. `prohand_try_recv_message()` (C),
+  `try_recv_message()` (Python), `tryRecvMessage()` (C++) return one decoded
+  frame per message kind instead of a single flattened struct: rotary and linear
+  status, rotary and linear targets, joint, IMU, power, alert, state and
+  handedness. Python exposes each as a dataclass (`RotaryStatusFrame`,
+  `ImuFrame`, `AlertFrame`, …) with `MessageKind`, `AlertSource`,
+  `AlertSeverity`, `ThermalEvent` and `Handedness` enums.
+- ABI verification. `prohand_abi_sizes()` reports the library's own struct
+  sizes; the Python bindings check all fifteen at import and raise with a
+  per-struct mismatch list, rather than silently misreading every field when a
+  wrapper is paired with a mismatched library.
+- ProGlove filter configuration: `proglove_get_default_filter_config()` and
+  `proglove_set_filter_config()`, with a `ProGloveFilterConfig` carrying
+  `deadzone_on`, `deadzone_off`, `denoise_enabled`, `stuck_spatial_threshold`
+  and `stuck_streak_on_frames`. Fetch the defaults, tweak what you need, then
+  apply — the command replaces the whole config, not a per-field patch.
+- Demo: `prohand-rerun` (`just demo python rerun-hand`) logs rotary and linear
+  feedback alongside the firmware's target echo to Rerun while streaming a
+  curl, starting the driver in a tmux session if none is running
+  (`--no-launch` to attach to an existing one). Needs the `rerun` extra.
+- `sdk/mise.toml` pins the toolchain the SDK and demos are built against —
+  Python 3.12.13, uv 0.11.26, just 1.57.0, CMake 4.1.2, Ninja 1.13.2 — so
+  `mise install` in `sdk/` is enough to build and run everything below it.
+
+### Changed
+- **Breaking (all languages):** `proglove_set_filter_enabled()` /
+  `set_filter_enabled()` / `setFilterEnabled()` are removed. There is no
+  whole-pipeline disable: subscribe to the driver's secondary raw PUB node
+  (`-raw.ipc`) for fully unfiltered ADC values, which — unlike a shared kill
+  switch — does not disrupt every other subscriber on the main filtered
+  endpoint.
+- **Breaking (behavior):** the host-side tactile filter is now baseline
+  subtraction → deadzone hysteresis → optional stuck-pixel masking. The
+  sliding-median pre-filter and the EMA smoothing stage are both gone, so
+  filtered taxel values will differ for the same physical touch.
+- `set_denoise_enabled()` keeps its name but gates less: stuck-pixel masking
+  alone (flatness streak + spatial isolation from a taxel's physical
+  neighbors), where it previously gated the median pre-filter along with it.
+- `try_recv_status()` still works and keeps its signature, but reports rotary
+  and linear values only, in raw wire units. Prefer `try_recv_message()` for
+  new code.
+- Rebuilt the driver binaries for macOS arm64, Linux x64 and Linux arm64.
+
+---
+
 ## [0.3.3.0] - 2026-07-28
 
 SDK 0.3.3.0 · firmware 0.9.1.0 · macOS app 0.3.3.0
@@ -82,19 +132,6 @@ SDK 0.3.3.0 · firmware 0.9.1.0 · macOS app 0.3.3.0
 - SDK version 0.3.1.0
 - Firmware version 0.9.1.0
 - macOS App version 0.3.1.0
-
----
-
-## [Unreleased]
-
-### Added
-- New features go here
-
-### Changed
-- Changes to existing functionality go here
-
-### Fixed
-- Bug fixes go here
 
 ---
 

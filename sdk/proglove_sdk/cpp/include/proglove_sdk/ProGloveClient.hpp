@@ -232,7 +232,7 @@ public:
   }
 
   /**
-   * Toggle the median pre-filter + stuck-pixel masking together.
+   * Toggle stuck-pixel masking.
    */
   void setDenoiseEnabled(bool enabled) {
     checkHandle();
@@ -241,13 +241,26 @@ public:
   }
 
   /**
-   * Toggle the whole tactile filter pipeline (baseline subtraction, EMA,
-   * deadzone, denoise). Disabling gives fully raw, unfiltered taxel values.
+   * Default filter configuration - a sensible starting point to tweak
+   * before calling setFilterConfig().
    */
-  void setFilterEnabled(bool enabled) {
+  static ProGloveFilterConfig defaultFilterConfig() {
+    ProGloveFilterConfig cfg{};
+    checkResult(proglove_get_default_filter_config(&cfg),
+                "getDefaultFilterConfig");
+    return cfg;
+  }
+
+  /**
+   * Replace the entire tactile filter configuration - deadzone on/off,
+   * stuck-pixel spatial-isolation threshold, and stuck-detection timing.
+   * This replaces the whole config, not a per-field patch — start from
+   * defaultFilterConfig() and override only what you need.
+   */
+  void setFilterConfig(const ProGloveFilterConfig &config) {
     checkHandle();
-    checkResult(proglove_set_filter_enabled(handle_, enabled ? 1 : 0),
-                "setFilterEnabled");
+    checkResult(proglove_set_filter_config(handle_, &config),
+                "setFilterConfig");
   }
 
   /**
@@ -428,7 +441,7 @@ private:
     }
   }
 
-  void checkResult(int result, const std::string &operation) const {
+  static void checkResult(int result, const std::string &operation) {
     if (result == PROGLOVE_SUCCESS) {
       return;
     }
