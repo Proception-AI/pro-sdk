@@ -623,11 +623,14 @@ class KeyframeMotionDemo(DemoBase):
         playback uses; `stream` is the lower-latency path for high-rate control
         (it drops stale frames instead of round-tripping per command).
         """
+        # hand_velocity is a raw 0-255 saturation count; the SDK now takes it
+        # normalized.
+        velocity = opt.hand_velocity / 255.0
         if opt.channel == "stream":
-            client.send_hand_streams(pose.flat_fingers(), opt.torque, opt.hand_velocity)
+            client.send_hand_streams(pose.flat_fingers(), opt.torque, velocity)
             client.send_wrist_streams(pose.wrist_rad)
         else:
-            client.send_hand_command(pose.flat_fingers(), opt.torque, opt.hand_velocity)
+            client.send_hand_command(pose.flat_fingers(), opt.torque, velocity)
             client.send_wrist_command(pose.wrist_rad)
 
     def _return_home(self, client, opt: Options) -> None:

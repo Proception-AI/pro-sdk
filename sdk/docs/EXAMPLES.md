@@ -155,30 +155,46 @@ positions[5] = math.radians(45.0)
 positions[6] = math.radians(40.0)
 positions[7] = math.radians(30.0)
 
-client.send_hand_command(positions, torque=0.45, velocity_saturation=50)
+client.send_hand_command(positions, torque=0.45, velocity_saturation=0.2)
 ```
 
-**`velocity_saturation`** caps servo speed in deg/s for every finger in the
-command. `0` means "use the default", which the driver resolves to 50 deg/s; the
-servo maximum is 110 deg/s.
+**`torque`** is normalized `0.0`-`1.0` and accepts three shapes. The wire carries
+one value per joint, so per-finger control has always been possible on the
+hardware — the SDK simply did not expose it before:
+
+```python
+client.send_hand_command(positions, 0.45)                        # whole hand
+client.send_hand_command(positions, [0.2, 0.6, .45, .45, .45])   # per finger
+client.send_hand_command(positions, [...20 values...])           # per joint
+```
+
+Per-finger order is thumb, index, middle, ring, pinky. Per-joint order matches
+`positions`.
+
+**`velocity_saturation`** caps servo speed for every finger in the command,
+normalized `0.0`-`1.0`. `0.0` means "use the firmware default". It is per-hand:
+the wire carries a single value for all fingers, so it cannot be set per finger.
 
 It is a *cap*, not a target. A trajectory asking for more travel per unit time
-than the cap allows gets truncated rather than tracked — 80 deg of travel in 0.5 s
-needs 160 deg/s and cannot be followed at any setting. Either lengthen the motion
-or raise the cap.
+than the cap allows gets truncated rather than tracked — 80 deg of travel in
+0.5 s needs 160 deg/s and cannot be followed at any setting. Either lengthen the
+motion or raise the cap.
 
-C++ and C take the same three arguments:
+C++ takes a scalar or a vector; C takes the 20-value array directly:
 
 ```cpp
 std::vector<float> positions(20, 0.0f);
-positions[5] = 0.785f;                        // index MCP, radians
-client.sendHandCommands(positions, 0.45f, 50);
+positions[5] = 0.785f;                              // index MCP, radians
+client.sendHandCommands(positions, 0.45f, 0.2f);    // uniform
+client.sendHandCommands(positions, {0.2f, 0.6f, 0.45f, 0.45f, 0.45f});  // per finger
 ```
 
 ```c
 float positions[20] = {0};
+float torques[20];
+for (int i = 0; i < 20; i++) torques[i] = 0.45f;
 positions[5] = 0.785f;
-prohand_send_hand_command(client, positions, 0.45f, 50);
+prohand_send_hand_command(client, positions, torques, 0.2f);
 ```
 
 ______________________________________________________________________

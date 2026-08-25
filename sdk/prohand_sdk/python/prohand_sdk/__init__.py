@@ -20,7 +20,12 @@ from .prohand_sdk import (
     RotaryStatusFrame,
     RotaryTargetFrame,
     StateFrame,
+    SignalRate,
+    SystemEvent,
+    SystemEventKind,
+    SystemStatus,
     ThermalEvent,
+    ThermalLoad,
     get_version,
 )
 from .prohand_sdk import *  # noqa: F403
@@ -48,6 +53,11 @@ __all__ = [
     "AlertSource",
     "AlertSeverity",
     "ThermalEvent",
+    "SignalRate",
+    "SystemEvent",
+    "SystemEventKind",
+    "SystemStatus",
+    "ThermalLoad",
     "Handedness",
 ]
 __version__ = "0.1.0"

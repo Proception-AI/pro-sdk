@@ -31,6 +31,7 @@ prohand-cyclic-motion = "prohand_demo.cyclic_motion:main"
 prohand-kapandji = "prohand_demo.kapandji:main"
 prohand-keyframe-motion = "prohand_demo.keyframe_motion:main"
 prohand-command-matrix = "prohand_demo.command_matrix:main"
+prohand-show-all = "prohand_demo.show_all:main"
 prohand-rerun = "prohand_demo.rerun_log:main"
 udcap-ctrl = "prohand_demo.udcap_ctrl:main"
 # ProGlove demos

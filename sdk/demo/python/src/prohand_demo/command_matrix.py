@@ -31,6 +31,9 @@ NEUTRAL_WRIST = [0.0, 0.0]
 NEUTRAL_ROTARY = [0.0] * 16
 NEUTRAL_LINEAR = [0.0, 0.0]
 DEFAULT_TORQUE = 0.3
+# Torque accepts a scalar, 5 values (per finger) or 20 (per joint).
+PER_FINGER_TORQUE = [0.2, 0.3, 0.3, 0.25, 0.25]
+PER_JOINT_TORQUE = [0.25] * 20
 
 
 @dataclass
@@ -127,9 +130,16 @@ class CommandMatrixDemo(DemoBase):
         )
         self._run(
             "guards",
-            "send_hand_command rejects velocity > 255",
+            "send_hand_command rejects a 3-element torque list",
             lambda: self._expect_raises(
-                bad, lambda: client.send_hand_command(NEUTRAL_FINGERS, 0.3, 256)
+                bad, lambda: client.send_hand_command(NEUTRAL_FINGERS, [0.3] * 3)
+            ),
+        )
+        self._run(
+            "guards",
+            "send_hand_command rejects velocity outside 0.0-1.0",
+            lambda: self._expect_raises(
+                bad, lambda: client.send_hand_command(NEUTRAL_FINGERS, 0.3, 1.5)
             ),
         )
         self._run(
@@ -174,8 +184,18 @@ class CommandMatrixDemo(DemoBase):
         )
         self._run(
             "command",
-            "send_hand_command (velocity_saturation=64)",
-            lambda: client.send_hand_command(NEUTRAL_FINGERS, DEFAULT_TORQUE, 64),
+            "send_hand_command (velocity_saturation=0.25)",
+            lambda: client.send_hand_command(NEUTRAL_FINGERS, DEFAULT_TORQUE, 0.25),
+        )
+        self._run(
+            "command",
+            "send_hand_command (per-finger torque)",
+            lambda: client.send_hand_command(NEUTRAL_FINGERS, PER_FINGER_TORQUE),
+        )
+        self._run(
+            "command",
+            "send_hand_command (per-joint torque)",
+            lambda: client.send_hand_command(NEUTRAL_FINGERS, PER_JOINT_TORQUE),
         )
         self._run(
             "command",
@@ -249,8 +269,18 @@ class CommandMatrixDemo(DemoBase):
         )
         self._run(
             "stream",
-            "send_hand_streams (velocity_saturation=64)",
-            lambda: client.send_hand_streams(NEUTRAL_FINGERS, DEFAULT_TORQUE, 64),
+            "send_hand_streams (velocity_saturation=0.25)",
+            lambda: client.send_hand_streams(NEUTRAL_FINGERS, DEFAULT_TORQUE, 0.25),
+        )
+        self._run(
+            "stream",
+            "send_hand_streams (per-finger torque)",
+            lambda: client.send_hand_streams(NEUTRAL_FINGERS, PER_FINGER_TORQUE),
+        )
+        self._run(
+            "stream",
+            "send_hand_streams (per-joint torque)",
+            lambda: client.send_hand_streams(NEUTRAL_FINGERS, PER_JOINT_TORQUE),
         )
         self._run(
             "stream",

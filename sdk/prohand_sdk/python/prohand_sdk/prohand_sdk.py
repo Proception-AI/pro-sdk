@@ -57,6 +57,8 @@ from ctypes import (
     c_char,
     c_char_p,
     c_int,
+    c_int8,
+    c_int16,
     c_int32,
     c_float,
     c_short,
@@ -70,7 +72,7 @@ from ctypes import (
     pointer,
     string_at,
 )
-from typing import List, Optional
+from typing import List, Optional, Union
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -242,6 +244,9 @@ class MessageKind(IntEnum):
     WRIST_JOINT_TARGET = 17
     HAND_JOINT_STATUS = 18
     WRIST_JOINT_STATUS = 19
+    # Host-synthesized per-signal alert rate. Consumed into the thermal-load
+    # cache inside the dylib; read it with thermal_load(), not try_recv_message().
+    HEALTH_STATUS = 20
     # Service side — reported by kind, payload not exposed here.
     ROTARY_SRV_STATUS = 100
     LINEAR_SRV_STATUS = 101
@@ -462,6 +467,80 @@ class ProHandMessageC(Structure):
     ]
 
 
+class ThermalLoadC(Structure):
+    """Mirror of the C `ThermalLoad`. Sizes checked by `_check_abi()`."""
+
+    _fields_ = [
+        ("source", c_uint8),
+        ("actuator", c_uint8),
+        ("warning_percent", c_uint8),
+        ("lockdown_percent", c_uint8),
+        ("warning_count", c_uint16),
+        ("lockdown_count", c_uint16),
+        ("last_temp_c", c_int8),
+        ("peak_temp_c", c_int8),
+    ]
+
+
+class SignalKeyC(Structure):
+    """Mirror of the C `SignalKey`."""
+
+    _fields_ = [
+        ("source", c_uint8),
+        ("severity", c_uint8),
+        ("actuator", c_uint8),
+        ("code", c_uint16),
+    ]
+
+
+class SignalRateC(Structure):
+    """Mirror of the C `SignalRate`."""
+
+    _fields_ = [
+        ("key", SignalKeyC),
+        ("rate_percent", c_uint8),
+        ("count_in_window", c_uint16),
+        ("last_detail", c_int16),
+        ("peak_detail", c_int16),
+        ("first_seen_ms", c_uint64),
+        ("last_seen_ms", c_uint64),
+    ]
+
+
+class ProHandSystemEventC(Structure):
+    """Mirror of the C `ProHandSystemEvent`."""
+
+    _fields_ = [
+        ("timestamp_ms", c_uint64),
+        ("code", c_uint16),
+        ("detail", c_int16),
+        ("kind", c_uint8),
+        ("source", c_uint8),
+        ("actuator", c_uint8),
+        ("severity", c_uint8),
+        ("rate_percent", c_uint8),
+    ]
+
+
+class ProHandSystemStatusC(Structure):
+    """Mirror of the C `ProHandSystemStatus`. Size checked by `_check_abi()`."""
+
+    _fields_ = [
+        ("ms_since_heartbeat", c_uint64),
+        ("connected", c_int),
+        ("hand_state", c_int),
+        ("active_signals", c_uint16),
+        ("alerts_in_window", c_uint16),
+        ("handedness", c_uint8),
+        ("thermal_lockdown", c_uint8),
+        ("worst_warning_percent", c_uint8),
+        ("worst_lockdown_percent", c_uint8),
+        ("worst_actuator", c_uint8),
+        ("peak_temp_c", c_int8),
+        ("worst_severity", c_uint8),
+    ]
+
+
 class ProHandAbiSizes(Structure):
     _fields_ = [
         ("message", c_uint32),
@@ -479,6 +558,8 @@ class ProHandAbiSizes(Structure):
         ("alert", c_uint32),
         ("state_info", c_uint32),
         ("status_info", c_uint32),
+        ("thermal_load", c_uint32),
+        ("system_status", c_uint32),
     ]
 
 
@@ -605,6 +686,120 @@ class OtherFrame:
     timestamp_ms: int
 
 
+class SystemEventKind(IntEnum):
+    """What a `SystemEvent` reports."""
+
+    #: A subsystem has been thermally warning long enough to be real, not noise.
+    THERMAL_WARNING_CONFIRMED = 0
+    #: A confirmed warning has stopped recurring.
+    THERMAL_WARNING_CLEARED = 1
+    #: The hand entered thermal lockdown. Never delayed or debounced.
+    THERMAL_LOCKDOWN = 2
+    #: The hand came out of thermal lockdown.
+    THERMAL_RECOVERED = 3
+
+
+@dataclass
+class SystemEvent:
+    """One qualified monitoring event.
+
+    Events run *beside* the status stream, not in front of it — nothing is
+    filtered out of `try_recv_status()`. An event says a condition has been
+    established, which is what you can act on; a lone alert cannot express that.
+    """
+
+    timestamp_ms: int
+    kind: SystemEventKind
+    source: int
+    actuator: int
+    severity: int
+    code: int
+    #: Temperature in °C for thermal events.
+    detail: int
+    rate_percent: int
+
+
+@dataclass
+class SystemStatus:
+    """Aggregate health of the hand — one passive read.
+
+    Prefer this over reacting to individual alerts: a lone alert carries no
+    severity, while a rate and a latched lockdown state do.
+
+    Assembled client-side from the driver's raw status stream. Reading it never
+    consumes a status message or sends a command, so it is safe to poll from a
+    UI at frame rate.
+    """
+
+    ms_since_heartbeat: int
+    connected: bool
+    #: Hand-state code, or -1 before the device has reported one. See the
+    #: hand-state table in prohand_sdk.h.
+    hand_state: int
+    active_signals: int
+    alerts_in_window: int
+    #: 0 unknown, 1 left, 2 right.
+    handedness: int
+    thermal_lockdown: bool
+    worst_warning_percent: int
+    worst_lockdown_percent: int
+    #: Actuator carrying the worst thermal load; 0xFF when none.
+    worst_actuator: int
+    peak_temp_c: int
+    #: 0 info, 1 warning, 2 error.
+    worst_severity: int
+
+
+@dataclass
+class SignalRate:
+    """One alerting signature and how hard it is firing.
+
+    The per-signature breakdown behind `SystemStatus.active_signals`. A flapping
+    servo error and a thermal warning on the same actuator are separate rows,
+    not pooled. `thermal_load()` is the thermal-only view of the same data.
+    """
+
+    #: AlertSource bit value.
+    source: int
+    #: 0 info, 1 warning, 2 error.
+    severity: int
+    #: Actuator index, or 0xFF when not actuator-specific.
+    actuator: int
+    #: Source-specific code; 0 for thermal.
+    code: int
+    #: Alerts over the window as a % of the maximum publishable. Saturates at 100.
+    rate_percent: int
+    count_in_window: int
+    #: Temperature in °C for thermal signals.
+    last_detail: int
+    peak_detail: int
+    first_seen_ms: int
+    last_seen_ms: int
+
+
+@dataclass
+class ThermalLoad:
+    """One subsystem's thermal load over the rolling window.
+
+    Firmware caps thermal alerts at one per subsystem per 5s, so that ceiling is
+    the denominator: `warning_percent` is how much of it the subsystem actually
+    used. A lone temperature excursion reads single digits; a genuinely hot
+    actuator saturates the channel and reads 100.
+
+    Prefer this over reacting to individual warnings — one warning carries no
+    severity, a percentage does.
+    """
+
+    source: int
+    actuator: int
+    warning_percent: int
+    lockdown_percent: int
+    warning_count: int
+    lockdown_count: int
+    last_temp_c: int
+    peak_temp_c: int
+
+
 @dataclass
 class UsbDevice:
     """Python-friendly USB device info"""
@@ -711,12 +906,52 @@ _lib.prohand_set_wrist_limits.argtypes = [
 ]
 _lib.prohand_set_wrist_limits.restype = c_int
 
+
+# Thermal load readout
+_lib.prohand_get_thermal_load.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(ThermalLoadC),
+    c_uint32,
+]
+_lib.prohand_get_thermal_load.restype = c_int
+
+_lib.prohand_get_worst_thermal_load.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(ThermalLoadC),
+]
+_lib.prohand_get_worst_thermal_load.restype = c_int
+
+# Aggregate system status
+_lib.prohand_get_system_status.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(ProHandSystemStatusC),
+]
+_lib.prohand_get_system_status.restype = c_int
+
+# Event-driven monitoring
+_lib.prohand_poll_system_event.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(ProHandSystemEventC),
+]
+_lib.prohand_poll_system_event.restype = c_int
+
+_lib.prohand_dropped_event_count.argtypes = [POINTER(ProHandClientHandle)]
+_lib.prohand_dropped_event_count.restype = c_int
+
+# Per-signature alert rates
+_lib.prohand_get_signal_rates.argtypes = [
+    POINTER(ProHandClientHandle),
+    POINTER(SignalRateC),
+    c_uint32,
+]
+_lib.prohand_get_signal_rates.restype = c_int
+
 # Hand command (high-level joint angles) - REQ/REP command channel
 _lib.prohand_send_hand_command.argtypes = [
     POINTER(ProHandClientHandle),
     POINTER(c_float),  # 20 positions (5 fingers × 4 joints)
-    c_float,  # torque
-    c_uint8,  # velocity_saturation (0 = firmware default)
+    POINTER(c_float),  # 20 torques, one per joint
+    c_float,  # velocity_saturation, normalized 0.0-1.0 (0.0 = firmware default)
 ]
 _lib.prohand_send_hand_command.restype = c_int
 
@@ -724,8 +959,8 @@ _lib.prohand_send_hand_command.restype = c_int
 _lib.prohand_send_hand_streams.argtypes = [
     POINTER(ProHandClientHandle),
     POINTER(c_float),  # 20 positions (5 fingers × 4 joints)
-    c_float,  # torque
-    c_uint8,  # velocity_saturation (0 = firmware default)
+    POINTER(c_float),  # 20 torques, one per joint
+    c_float,  # velocity_saturation, normalized 0.0-1.0 (0.0 = firmware default)
 ]
 _lib.prohand_send_hand_streams.restype = c_int
 
@@ -831,6 +1066,8 @@ def _check_abi() -> None:
         "alert": _AlertC,
         "state_info": _StateInfoC,
         "status_info": ProHandStatusInfo,
+        "thermal_load": ThermalLoadC,
+        "system_status": ProHandSystemStatusC,
     }
     mismatches = [
         f"{name}: library {getattr(sizes, name)} != wrapper {ctypes.sizeof(struct)}"
@@ -1005,6 +1242,97 @@ def _decode_message(message: ProHandMessageC):
         return HandednessFrame(handedness=Handedness(payload.handedness))
 
     return OtherFrame(kind=kind, timestamp_ms=message.timestamp_ms)
+
+
+# Matches MAX_SIGNALS in the SDK's signal_rate tracker — the hard bound on how
+# many rows either getter can return, so a buffer this size can never truncate.
+MAX_SIGNALS = 48
+
+
+def _system_event_from_c(c: "ProHandSystemEventC") -> SystemEvent:
+    return SystemEvent(
+        timestamp_ms=c.timestamp_ms,
+        kind=SystemEventKind(c.kind),
+        source=c.source,
+        actuator=c.actuator,
+        severity=c.severity,
+        code=c.code,
+        detail=c.detail,
+        rate_percent=c.rate_percent,
+    )
+
+
+def _system_status_from_c(c: "ProHandSystemStatusC") -> SystemStatus:
+    return SystemStatus(
+        ms_since_heartbeat=c.ms_since_heartbeat,
+        connected=bool(c.connected),
+        hand_state=c.hand_state,
+        active_signals=c.active_signals,
+        alerts_in_window=c.alerts_in_window,
+        handedness=c.handedness,
+        thermal_lockdown=bool(c.thermal_lockdown),
+        worst_warning_percent=c.worst_warning_percent,
+        worst_lockdown_percent=c.worst_lockdown_percent,
+        worst_actuator=c.worst_actuator,
+        peak_temp_c=c.peak_temp_c,
+        worst_severity=c.worst_severity,
+    )
+
+
+def _signal_rate_from_c(c: "SignalRateC") -> SignalRate:
+    return SignalRate(
+        source=c.key.source,
+        severity=c.key.severity,
+        actuator=c.key.actuator,
+        code=c.key.code,
+        rate_percent=c.rate_percent,
+        count_in_window=c.count_in_window,
+        last_detail=c.last_detail,
+        peak_detail=c.peak_detail,
+        first_seen_ms=c.first_seen_ms,
+        last_seen_ms=c.last_seen_ms,
+    )
+
+
+def _thermal_load_from_c(c: "ThermalLoadC") -> ThermalLoad:
+    return ThermalLoad(
+        source=c.source,
+        actuator=c.actuator,
+        warning_percent=c.warning_percent,
+        lockdown_percent=c.lockdown_percent,
+        warning_count=c.warning_count,
+        lockdown_count=c.lockdown_count,
+        last_temp_c=c.last_temp_c,
+        peak_temp_c=c.peak_temp_c,
+    )
+
+
+def _expand_torques(torque: Union[float, List[float]]):
+    """Expand a torque argument into the 20 per-joint values the wire carries.
+
+    Accepts a scalar (whole hand), 5 values (per finger, thumb to pinky), or 20
+    (per joint, in the same order as positions).
+    """
+    if isinstance(torque, (int, float)):
+        values = [float(torque)] * 20
+    else:
+        values = [float(t) for t in torque]
+        if len(values) == 5:
+            values = [values[i // 4] for i in range(20)]  # 4 joints per finger
+        elif len(values) != 20:
+            raise InvalidArgumentError(
+                "torque must be a scalar, 5 values (per finger) or 20 (per joint), "
+                f"got {len(values)}"
+            )
+    return (c_float * 20)(*values)
+
+
+def _check_velocity_saturation(velocity_saturation: float) -> None:
+    if not 0.0 <= velocity_saturation <= 1.0:
+        raise InvalidArgumentError(
+            "velocity_saturation is normalized 0.0-1.0 (0.0 = firmware default); "
+            f"got {velocity_saturation}"
+        )
 
 
 def _check_result(result: int, operation: str = "operation"):
@@ -1357,11 +1685,101 @@ class ProHandClient:
         result = _lib.prohand_set_wrist_limits(self._handle, vel, acc, jerk)
         _check_result(result, "set_wrist_limits")
 
+    def poll_event(self) -> Optional[SystemEvent]:
+        """
+        Take the next qualified monitoring event, oldest first, or None when the
+        queue is empty.
+
+        Events run beside the status stream, not in front of it: nothing is
+        filtered out of `try_recv_message()`. Poll until this returns None to
+        drain the queue.
+        """
+        out = ProHandSystemEventC()
+        n = _lib.prohand_poll_system_event(self._handle, byref(out))
+        if n < 0:
+            _check_result(n, "poll_event")
+        return _system_event_from_c(out) if n == 1 else None
+
+    def drain_events(self) -> List[SystemEvent]:
+        """Every queued monitoring event, oldest first."""
+        events = []
+        while (event := self.poll_event()) is not None:
+            events.append(event)
+        return events
+
+    @property
+    def dropped_events(self) -> int:
+        """
+        Events discarded because the queue filled — non-zero means this client
+        is not polling often enough. The queue is bounded and drops oldest-first,
+        so falling behind costs a fixed amount of memory, not unbounded growth.
+        """
+        n = _lib.prohand_dropped_event_count(self._handle)
+        if n < 0:
+            _check_result(n, "dropped_events")
+        return n
+
+    def system_status(self) -> SystemStatus:
+        """
+        Aggregate health of the hand: liveness, state, thermal load and alert
+        rates in one passive read.
+
+        Prefer this over reacting to individual alerts — a lone alert carries no
+        severity, a rate and a latched lockdown state do.
+
+        Never consumes a status message or sends a command, so it is safe to
+        poll from a UI at frame rate.
+        """
+        out = ProHandSystemStatusC()
+        result = _lib.prohand_get_system_status(self._handle, byref(out))
+        _check_result(result, "system_status")
+        return _system_status_from_c(out)
+
+    def signal_rates(self) -> List[SignalRate]:
+        """
+        Every alerting signal active inside the window, thermal or not.
+
+        One row per unique (source, severity, actuator, code). `thermal_load()`
+        is the thermal-only view of the same data, reassembled per subsystem.
+        """
+        buf = (SignalRateC * MAX_SIGNALS)()
+        n = _lib.prohand_get_signal_rates(self._handle, buf, c_uint32(MAX_SIGNALS))
+        if n < 0:
+            _check_result(n, "signal_rates")
+        return [_signal_rate_from_c(buf[i]) for i in range(max(n, 0))]
+
+    def thermal_load(self) -> List[ThermalLoad]:
+        """
+        Thermal load per subsystem, as a percentage of the maximum rate at which
+        firmware can publish thermal alerts. Quiet subsystems are omitted.
+
+        Measured by the driver on its raw alert stream and republished on the
+        filtered status channel this client subscribes to, so the debouncing
+        applied to that channel does not distort these numbers — and the counts
+        span the driver's uptime, not just this connection.
+        """
+        buf = (ThermalLoadC * MAX_SIGNALS)()
+        n = _lib.prohand_get_thermal_load(self._handle, buf, c_uint32(MAX_SIGNALS))
+        _check_result(n, "thermal_load") if n < 0 else None
+        return [_thermal_load_from_c(buf[i]) for i in range(max(n, 0))]
+
+    def worst_thermal_load(self) -> Optional[ThermalLoad]:
+        """
+        The most loaded subsystem, lockdown ranked above warning.
+
+        Returns None when nothing has alerted inside the window.
+        """
+        out = ThermalLoadC()
+        n = _lib.prohand_get_worst_thermal_load(self._handle, byref(out))
+        if n < 0:
+            _check_result(n, "worst_thermal_load")
+        return _thermal_load_from_c(out) if n == 1 else None
+
     def send_hand_command(
         self,
         positions: List[float],
-        torque: float = 0.45,
-        velocity_saturation: int = 0,
+        torque: Union[float, List[float]] = 0.45,
+        velocity_saturation: float = 0.0,
     ):
         """
         Send hand command via REQ/REP command channel (high-level joint angles, uses inverse kinematics)
@@ -1375,38 +1793,41 @@ class ProHandClient:
         Args:
             positions: List of 20 floats (5 fingers × 4 joints) in radians
                       Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
-            torque: Single torque value (normalized 0.0 to 1.0) applied to all joints
-            velocity_saturation: Global servo velocity cap (0-255) applied to all
-                      fingers. 0 uses the default velocity, resolved by the driver.
+            torque: Torque normalized 0.0 to 1.0. A scalar applies to the whole
+                      hand, 5 values apply per finger (thumb to pinky), and 20
+                      apply per joint, in the same order as positions.
+            velocity_saturation: Global servo velocity cap, normalized 0.0 to 1.0.
+                      0.0 uses the firmware default. The cap is per-hand: the wire
+                      carries one value for all fingers.
 
         Example:
-            # All fingers at zero
+            # Uniform grip
             positions = [0.0] * 20
             client.send_hand_command(positions, 0.45)
 
-            # Index finger metacarpal at 30 degrees
-            positions = [0.0] * 20
-            positions[4] = math.radians(30.0)  # index metacarpal
-            client.send_hand_command(positions, 0.45)
+            # Light thumb, firm index, default elsewhere
+            client.send_hand_command(positions, [0.2, 0.6, 0.45, 0.45, 0.45])
         """
         if len(positions) != 20:
             raise InvalidArgumentError(
                 "positions must have 20 elements (5 fingers × 4 joints)"
             )
-        if not 0 <= velocity_saturation <= 255:
-            raise InvalidArgumentError("velocity_saturation must be in 0..=255")
+        _check_velocity_saturation(velocity_saturation)
 
         pos_array = (c_float * 20)(*positions)
         result = _lib.prohand_send_hand_command(
-            self._handle, pos_array, c_float(torque), c_uint8(velocity_saturation)
+            self._handle,
+            pos_array,
+            _expand_torques(torque),
+            c_float(velocity_saturation),
         )
         _check_result(result, "send_hand_command")
 
     def send_hand_streams(
         self,
         positions: List[float],
-        torque: float = 0.45,
-        velocity_saturation: int = 0,
+        torque: Union[float, List[float]] = 0.45,
+        velocity_saturation: float = 0.0,
     ):
         """
         Send hand command via PUB/SUB streaming channel (high-level joint angles, uses inverse kinematics)
@@ -1420,9 +1841,12 @@ class ProHandClient:
         Args:
             positions: List of 20 floats (5 fingers × 4 joints) in radians
                       Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
-            torque: Single torque value (normalized 0.0 to 1.0) applied to all joints
-            velocity_saturation: Global servo velocity cap (0-255) applied to all
-                      fingers. 0 uses the default velocity, resolved by the driver.
+            torque: Torque normalized 0.0 to 1.0. A scalar applies to the whole
+                      hand, 5 values apply per finger (thumb to pinky), and 20
+                      apply per joint, in the same order as positions.
+            velocity_saturation: Global servo velocity cap, normalized 0.0 to 1.0.
+                      0.0 uses the firmware default. The cap is per-hand: the wire
+                      carries one value for all fingers.
 
         Raises:
             ConnectionError: If streaming endpoint was not provided or driver not in streaming mode
@@ -1442,12 +1866,14 @@ class ProHandClient:
             raise InvalidArgumentError(
                 "positions must have 20 elements (5 fingers × 4 joints)"
             )
-        if not 0 <= velocity_saturation <= 255:
-            raise InvalidArgumentError("velocity_saturation must be in 0..=255")
+        _check_velocity_saturation(velocity_saturation)
 
         pos_array = (c_float * 20)(*positions)
         result = _lib.prohand_send_hand_streams(
-            self._handle, pos_array, c_float(torque), c_uint8(velocity_saturation)
+            self._handle,
+            pos_array,
+            _expand_torques(torque),
+            c_float(velocity_saturation),
         )
         _check_result(result, "send_hand_streams")
 

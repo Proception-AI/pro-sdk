@@ -442,8 +442,10 @@ try {
 
 #### Hand Commands (20 finger joints - high-level joint control with inverse kinematics)
 
-- `sendHandCommands(positions, torque)` - Via REQ/REP (low frequency)
-- `sendHandStreams(positions, torque)` - Via PUB/SUB (high frequency, requires streaming mode)
+- `sendHandCommands(positions, torque, velocitySaturation)` - Via REQ/REP (low frequency)
+- `sendHandStreams(positions, torque, velocitySaturation)` - Via PUB/SUB (high frequency, requires streaming mode)
+  - `torque` is a scalar (whole hand) or a `std::vector<float>` of 5 (per finger) or 20 (per joint)
+  - `velocitySaturation` is normalized 0.0-1.0; 0.0 uses the firmware default
 
 #### Calibration
 

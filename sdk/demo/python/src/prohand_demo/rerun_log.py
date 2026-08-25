@@ -356,6 +356,9 @@ class RerunLogDemo(DemoBase):
         period = 1.0 / max(args.rate_hz, 1e-6)
         start = time.time()
         next_send = start
+        # --velocity is a raw 0-255 saturation count; the SDK now takes it
+        # normalized.
+        velocity_norm = args.velocity / 255.0
         try:
             while args.duration <= 0 or time.time() - start < args.duration:
                 now = time.time()
@@ -364,7 +367,7 @@ class RerunLogDemo(DemoBase):
                     cycle = (now - start) % args.cycle_s / args.cycle_s
                     phase = 2.0 * cycle if cycle < 0.5 else 2.0 * (1.0 - cycle)
                     pose = curl_pose(phase, args.curl_deg, args.include_thumb)
-                    client.send_hand_streams(pose, args.torque, args.velocity)
+                    client.send_hand_streams(pose, args.torque, velocity_norm)
                     set_wallclock(now)
                     for f, finger in enumerate(FINGER_NAMES):
                         for j, joint in enumerate(JOINT_NAMES):
@@ -390,7 +393,7 @@ class RerunLogDemo(DemoBase):
             if args.motion:
                 # Park the hand flat and hand the driver back to command mode.
                 try:
-                    client.send_hand_streams([0.0] * 20, args.torque, args.velocity)
+                    client.send_hand_streams([0.0] * 20, args.torque, velocity_norm)
                     time.sleep(0.3)
                     client.set_streaming_mode(False)
                 except Exception as e:
