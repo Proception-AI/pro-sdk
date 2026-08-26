@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -16,6 +18,10 @@
 #include <vector>
 
 namespace prohand_sdk {
+
+/// Matches MAX_SIGNALS in the SDK's signal_rate tracker — the hard bound on how
+/// many rows either getter can return, so a buffer this size never truncates.
+constexpr size_t kMaxSignals = 48;
 
 /**
  * Exception thrown by SDK operations
@@ -85,6 +91,39 @@ private:
   std::string commandEndpoint_;
   std::string statusEndpoint_;
 
+  static void checkPositions(const std::vector<float> &positions) {
+    if (positions.size() != 20) {
+      throw SdkException(
+          "positions must have 20 elements (5 fingers × 4 joints)");
+    }
+  }
+
+  /**
+   * Broadcast a whole-hand or per-finger torque vector across the 20 per-joint
+   * slots the wire carries. A 20-element vector passes through unchanged.
+   */
+  static std::array<float, 20>
+  expandTorques(const std::vector<float> &torques) {
+    std::array<float, 20> perJoint{};
+    switch (torques.size()) {
+    case 1:
+      perJoint.fill(torques[0]);
+      break;
+    case 5:
+      for (size_t i = 0; i < perJoint.size(); ++i) {
+        perJoint[i] = torques[i / 4]; // 4 joints per finger
+      }
+      break;
+    case 20:
+      std::copy(torques.begin(), torques.end(), perJoint.begin());
+      break;
+    default:
+      throw SdkException(
+          "torques must have 1, 5 (per finger) or 20 (per joint) elements");
+    }
+    return perJoint;
+  }
+
 public:
   /**
    * Create a new ProHand client
@@ -132,6 +171,144 @@ public:
     auto result = prohand_set_wrist_limits(
         handle_, max_velocity.data(), max_acceleration.data(), max_jerk.data());
     checkResult(result, "setWristLimits");
+  }
+
+  /**
+   * Take the next qualified monitoring event, oldest first.
+   *
+   * Events run *beside* the status stream, not in front of it — nothing is
+   * filtered out of tryRecvMessage(). An event says a condition has been
+   * established (a thermal warning that persisted, a lockdown), which is what
+   * you can act on; a lone alert cannot express that.
+   *
+   * @return empty when the queue is drained
+   * @throws SdkException on error
+   */
+  std::optional<ProHandSystemEvent> pollEvent() {
+    checkHandle();
+    ProHandSystemEvent event{};
+    auto n = prohand_poll_system_event(handle_, &event);
+    if (n < 0) {
+      checkResult(static_cast<ProHandResult>(n), "pollEvent");
+    }
+    if (n == 1) {
+      return event;
+    }
+    return std::nullopt;
+  }
+
+  /** Every queued monitoring event, oldest first. */
+  std::vector<ProHandSystemEvent> drainEvents() {
+    std::vector<ProHandSystemEvent> out;
+    while (auto e = pollEvent()) {
+      out.push_back(*e);
+    }
+    return out;
+  }
+
+  /**
+   * Events discarded because the queue filled — non-zero means this client is
+   * not polling often enough. The queue is bounded and drops oldest-first, so
+   * falling behind costs fixed memory, not unbounded growth.
+   *
+   * @throws SdkException on error
+   */
+  int32_t droppedEvents() {
+    checkHandle();
+    auto n = prohand_dropped_event_count(handle_);
+    if (n < 0) {
+      checkResult(static_cast<ProHandResult>(n), "droppedEvents");
+    }
+    return n;
+  }
+
+  /**
+   * Aggregate health of the hand: liveness, state, thermal load and alert rates
+   * in one passive read.
+   *
+   * Prefer this over reacting to individual alerts — a lone alert carries no
+   * severity, while a rate and a latched lockdown state do.
+   *
+   * Assembled client-side from the driver's raw status stream. Never consumes a
+   * status message or sends a command, so it is safe to poll from a UI at frame
+   * rate.
+   *
+   * @throws SdkException on error
+   */
+  ProHandSystemStatus systemStatus() {
+    checkHandle();
+    ProHandSystemStatus status{};
+    auto result = prohand_get_system_status(handle_, &status);
+    checkResult(result, "systemStatus");
+    return status;
+  }
+
+  /**
+   * Thermal load per subsystem, as a percentage of the maximum rate at which
+   * firmware can publish thermal alerts. Quiet subsystems are omitted.
+   *
+   * Firmware caps thermal alerts at one per subsystem per 5 s, so that ceiling
+   * is the denominator: a lone temperature excursion reads single digits, a
+   * genuinely hot actuator saturates the channel and reads 100. Prefer this
+   * over reacting to individual warnings — one warning carries no severity, a
+   * percentage does.
+   *
+   * Measured by the driver on its raw alert stream and republished on the
+   * filtered status channel this client subscribes to, so the debouncing
+   * applied to that channel does not distort these numbers — and the counts
+   * span the driver's uptime, not just this connection.
+   *
+   * @throws SdkException on error
+   */
+  std::vector<ThermalLoad> thermalLoad() {
+    checkHandle();
+    std::vector<ThermalLoad> loads(kMaxSignals);
+    auto n = prohand_get_thermal_load(handle_, loads.data(),
+                                      static_cast<uint32_t>(loads.size()));
+    if (n < 0) {
+      checkResult(static_cast<ProHandResult>(n), "thermalLoad");
+    }
+    loads.resize(static_cast<size_t>(n));
+    return loads;
+  }
+
+  /**
+   * Every alerting signal active inside the window, thermal or not.
+   *
+   * One row per unique (source, severity, actuator, code). thermalLoad() is the
+   * thermal-only view of the same data, reassembled per subsystem.
+   *
+   * @throws SdkException on error
+   */
+  std::vector<SignalRate> signalRates() {
+    checkHandle();
+    std::vector<SignalRate> rates(kMaxSignals);
+    auto n = prohand_get_signal_rates(handle_, rates.data(),
+                                      static_cast<uint32_t>(rates.size()));
+    if (n < 0) {
+      checkResult(static_cast<ProHandResult>(n), "signalRates");
+    }
+    rates.resize(static_cast<size_t>(n));
+    return rates;
+  }
+
+  /**
+   * The most loaded subsystem, lockdown ranked above warning.
+   *
+   * @return empty when nothing has alerted inside the window
+   * @throws SdkException on error
+   */
+  std::optional<ThermalLoad> worstThermalLoad() {
+    checkHandle();
+    ThermalLoad load{};
+    auto n = prohand_get_worst_thermal_load(handle_, &load);
+    if (n < 0) {
+      checkResult(static_cast<ProHandResult>(n), "worstThermalLoad");
+    }
+    if (n == 1) {
+      return load;
+    }
+    return std::nullopt;
   }
 
   // Disable copy
@@ -450,24 +627,28 @@ public:
    * @param positions 20 position values in radians (5 fingers × 4 joints)
    *                  Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15],
    * pinky[16-19]
-   * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
-   * joints
-   * @param velocitySaturation Global servo velocity cap applied to all fingers.
-   * Pass 0 to use the default velocity; the driver resolves it.
+   * @param torques Torque, normalized 0.0 to 1.0. Accepts 1 value (whole hand),
+   * 5 (per finger, thumb-to-pinky) or 20 (per joint, same order as positions).
+   * @param velocitySaturation Global servo velocity cap, normalized 0.0 to 1.0.
+   * Pass 0.0 to use the firmware default. The cap is per-hand, not per-finger.
    * @throws SdkException on error
    */
-  void sendHandCommands(const std::vector<float> &positions, float torque,
-                        uint8_t velocitySaturation = 0) {
+  void sendHandCommands(const std::vector<float> &positions,
+                        const std::vector<float> &torques,
+                        float velocitySaturation = 0.0f) {
     checkHandle();
+    checkPositions(positions);
+    auto perJoint = expandTorques(torques);
 
-    if (positions.size() != 20) {
-      throw SdkException(
-          "positions must have 20 elements (5 fingers × 4 joints)");
-    }
-
-    auto result = prohand_send_hand_command(handle_, positions.data(), torque,
-                                            velocitySaturation);
+    auto result = prohand_send_hand_command(
+        handle_, positions.data(), perJoint.data(), velocitySaturation);
     checkResult(result, "sendHandCommands");
+  }
+
+  /** Uniform-torque overload of sendHandCommands(). */
+  void sendHandCommands(const std::vector<float> &positions, float torque,
+                        float velocitySaturation = 0.0f) {
+    sendHandCommands(positions, std::vector<float>{torque}, velocitySaturation);
   }
 
   /**
@@ -485,25 +666,29 @@ public:
    * @param positions 20 position values in radians (5 fingers × 4 joints)
    *                  Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15],
    * pinky[16-19]
-   * @param torque Single torque value (normalized 0.0 to 1.0) applied to all
-   * joints
-   * @param velocitySaturation Global servo velocity cap applied to all fingers.
-   * Pass 0 to use the default velocity; the driver resolves it.
+   * @param torques Torque, normalized 0.0 to 1.0. Accepts 1 value (whole hand),
+   * 5 (per finger, thumb-to-pinky) or 20 (per joint, same order as positions).
+   * @param velocitySaturation Global servo velocity cap, normalized 0.0 to 1.0.
+   * Pass 0.0 to use the firmware default. The cap is per-hand, not per-finger.
    * @throws SdkException if streaming not available or driver not in streaming
    * mode
    */
-  void sendHandStreams(const std::vector<float> &positions, float torque,
-                       uint8_t velocitySaturation = 0) {
+  void sendHandStreams(const std::vector<float> &positions,
+                       const std::vector<float> &torques,
+                       float velocitySaturation = 0.0f) {
     checkHandle();
+    checkPositions(positions);
+    auto perJoint = expandTorques(torques);
 
-    if (positions.size() != 20) {
-      throw SdkException(
-          "positions must have 20 elements (5 fingers × 4 joints)");
-    }
-
-    auto result = prohand_send_hand_streams(handle_, positions.data(), torque,
-                                            velocitySaturation);
+    auto result = prohand_send_hand_streams(
+        handle_, positions.data(), perJoint.data(), velocitySaturation);
     checkResult(result, "sendHandStreams");
+  }
+
+  /** Uniform-torque overload of sendHandStreams(). */
+  void sendHandStreams(const std::vector<float> &positions, float torque,
+                       float velocitySaturation = 0.0f) {
+    sendHandStreams(positions, std::vector<float>{torque}, velocitySaturation);
   }
 
   /**

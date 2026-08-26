@@ -11,6 +11,10 @@ connect:
 ping *args:
     cd src && python3 -m prohand_demo.ping {{ args }}
 
+# Show every value the SDK exposes (read-only dashboard, sends no commands)
+show-all *args:
+    cd src && python3 -m prohand_demo.show_all {{ args }}
+
 # Run test_hand demo (test each joint individually)
 test-hand *args:
     cd src && python3 -m prohand_demo.test_hand {{ args }}

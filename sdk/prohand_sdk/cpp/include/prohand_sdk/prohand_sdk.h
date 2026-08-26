@@ -36,6 +36,25 @@
 #define LINEAR_COUNT 2
 
 /**
+ * Buckets in the sliding window. Each is one minimum-alert-interval wide, so a
+ * signal repeating at the firmware maximum fills exactly one per bucket and
+ * reads 100%.
+ */
+#define BUCKETS 12
+
+/**
+ * Distinct signal signatures tracked. Sized well above a real device: 16 rotary
+ * + 2 linear + IMU across a handful of severities and codes.
+ */
+#define MAX_SIGNALS 48
+
+#define INFO 0
+
+#define WARNING 1
+
+#define ERROR 2
+
+/**
  * Host-side OTA chunk size, in bytes. Deliberately NOT
  * `OTA_MAX_CHUNK_SIZE`: that is a per-binary RECEIVE bound which feature
  * unification can raise to 96 in some hosts (proglove-messages enables
@@ -43,6 +62,23 @@
  * mismatched senders get every chunk rejected. 64 fits every receiver.
  */
 #define OTA_HOST_CHUNK_SIZE 64
+
+/**
+ * Reported before any `HandState` has been seen.
+ */
+#define HAND_STATE_UNKNOWN -1
+
+/**
+ * `hand_state` value for thermal lockdown — the authoritative signal, since
+ * firmware puts the hand in this state whether or not an alert reaches us.
+ */
+#define HAND_STATE_THERMAL_PROTECTION 8
+
+#define UNKNOWN 0
+
+#define LEFT 1
+
+#define RIGHT 2
 
 #define PROHAND_MSG_NONE -1
 
@@ -233,6 +269,35 @@ typedef uint8_t ThermalEvent;
 #endif // __cplusplus
 
 /**
+ * What happened. Values are stable: they cross the C boundary.
+ */
+enum SystemEventKind
+#ifdef __cplusplus
+    : uint8_t
+#endif // __cplusplus
+{
+  /**
+   * A subsystem has been thermally warning long enough to be real, not noise.
+   */
+  SystemEventKind_ThermalWarningConfirmed = 0,
+  /**
+   * A confirmed warning has stopped recurring.
+   */
+  SystemEventKind_ThermalWarningCleared = 1,
+  /**
+   * The hand entered thermal lockdown. Never delayed or debounced.
+   */
+  SystemEventKind_ThermalLockdown = 2,
+  /**
+   * The hand came out of thermal lockdown.
+   */
+  SystemEventKind_ThermalRecovered = 3,
+};
+#ifndef __cplusplus
+typedef uint8_t SystemEventKind;
+#endif // __cplusplus
+
+/**
  * Opaque handle to a ProHandIpcClient
  */
 typedef struct ProHandClientHandle ProHandClientHandle;
@@ -279,6 +344,197 @@ typedef struct ProHandStatusInfo {
    */
   short linear_targets[2];
 } ProHandStatusInfo;
+
+/**
+ * Thermal load for one `(source, actuator)`, reassembled from the two thermal
+ * severities. Kept as a distinct type because the ProHand SDK hands it across
+ * its C boundary verbatim.
+ */
+typedef struct ThermalLoad {
+  /**
+   * `AlertSource` bit value.
+   */
+  uint8_t source;
+  /**
+   * Actuator index, or `0xFF` when not actuator-specific.
+   */
+  uint8_t actuator;
+  /**
+   * Warning-severity thermal alerts as a percentage of the publishable
+   * maximum. Saturates at 100.
+   */
+  uint8_t warning_percent;
+  /**
+   * Same, for thermal lockdown (error severity).
+   */
+  uint8_t lockdown_percent;
+  uint16_t warning_count;
+  uint16_t lockdown_count;
+  /**
+   * Temperature on the most recent thermal alert, °C.
+   */
+  int8_t last_temp_c;
+  /**
+   * Highest temperature seen since the tracker was created, °C.
+   */
+  int8_t peak_temp_c;
+} ThermalLoad;
+
+/**
+ * Aggregate health of the connected hand.
+ *
+ * `repr(C)`: handed across the SDK's C boundary verbatim. Field order groups by
+ * alignment so the layout has no interior padding to get wrong.
+ */
+typedef struct ProHandSystemStatus {
+  /**
+   * Milliseconds since the last status message of any kind, or `u64::MAX`
+   * when none has arrived yet. Finer-grained liveness than `connected`,
+   * which stays true for up to 10 s after the driver goes silent.
+   */
+  uint64_t ms_since_heartbeat;
+  /**
+   * Non-zero while the driver connection is live.
+   */
+  int connected;
+  /**
+   * Latest `HandState` code, or `-1` before one has been reported.
+   */
+  int hand_state;
+  /**
+   * Distinct alert signatures active in the window.
+   */
+  uint16_t active_signals;
+  /**
+   * Total alerts across all signatures in the window. Saturates at
+   * `u16::MAX`; see `SharedThermalLoad::totals`.
+   */
+  uint16_t alerts_in_window;
+  /**
+   * `0` unknown, `1` left, `2` right.
+   */
+  uint8_t handedness;
+  /**
+   * Non-zero while a thermal lockdown is latched. A *state*, not a rate — it
+   * does not age out of the window while the hand is still locked out.
+   */
+  uint8_t thermal_lockdown;
+  /**
+   * Worst subsystem's thermal warning rate, as a percentage of the maximum
+   * firmware can publish. `0` when nothing is warm.
+   */
+  uint8_t worst_warning_percent;
+  /**
+   * Same, for thermal lockdown alerts.
+   */
+  uint8_t worst_lockdown_percent;
+  /**
+   * Actuator carrying that worst load; `0xFF` when none.
+   */
+  uint8_t worst_actuator;
+  /**
+   * Highest temperature on any thermal alert in the window, °C.
+   */
+  int8_t peak_temp_c;
+  /**
+   * Highest alert severity in the window: `0` info, `1` warning, `2` error.
+   */
+  uint8_t worst_severity;
+} ProHandSystemStatus;
+
+/**
+ * One qualified event.
+ *
+ * `repr(C)`: handed across the C boundary verbatim, field order grouped by
+ * alignment so there is no interior padding to get wrong.
+ */
+typedef struct ProHandSystemEvent {
+  /**
+   * Client monotonic milliseconds at which the event was raised.
+   */
+  uint64_t timestamp_ms;
+  /**
+   * Source-specific code from the triggering alert. `0` for thermal.
+   */
+  uint16_t code;
+  /**
+   * `detail` from the triggering alert — temperature in °C for thermal.
+   */
+  int16_t detail;
+  /**
+   * A [`SystemEventKind`].
+   */
+  uint8_t kind;
+  /**
+   * `AlertSource` bit value.
+   */
+  uint8_t source;
+  /**
+   * Actuator index, or `0xFF` when not actuator-specific.
+   */
+  uint8_t actuator;
+  /**
+   * `AlertSeverity` of the triggering alert.
+   */
+  uint8_t severity;
+  /**
+   * Warning rate for this subsystem when the event was raised, as a
+   * percentage of the maximum firmware can publish.
+   */
+  uint8_t rate_percent;
+} ProHandSystemEvent;
+
+/**
+ * Identity of a repeating alert. Two alerts share a rate only when all four
+ * fields match.
+ */
+typedef struct SignalKey {
+  /**
+   * `AlertSource` bit value.
+   */
+  uint8_t source;
+  /**
+   * `AlertSeverity` value — see [`severity`].
+   */
+  uint8_t severity;
+  /**
+   * Actuator index, or `0xFF` when not actuator-specific.
+   */
+  uint8_t actuator;
+  /**
+   * Source-specific code. `0` for thermal alerts.
+   */
+  uint16_t code;
+} SignalKey;
+
+/**
+ * One signal's rate over the window.
+ */
+typedef struct SignalRate {
+  struct SignalKey key;
+  /**
+   * Alerts over the window as a percentage of the most firmware could
+   * publish in it. Saturates at 100.
+   */
+  uint8_t rate_percent;
+  uint16_t count_in_window;
+  /**
+   * `detail` from the most recent alert. Temperature in °C for thermal.
+   */
+  int16_t last_detail;
+  /**
+   * Highest `detail` seen since the tracker was created.
+   */
+  int16_t peak_detail;
+  /**
+   * Clock reading when this signature was first seen.
+   */
+  uint64_t first_seen_ms;
+  /**
+   * Clock reading of the most recent alert.
+   */
+  uint64_t last_seen_ms;
+} SignalRate;
 
 typedef struct RotaryStatus {
   int16_t position;
@@ -599,6 +855,8 @@ typedef struct ProHandAbiSizes {
   uint32_t alert;
   uint32_t state_info;
   uint32_t status_info;
+  uint32_t thermal_load;
+  uint32_t system_status;
 } ProHandAbiSizes;
 
 #ifdef __cplusplus
@@ -649,12 +907,14 @@ int prohand_client_is_connected(const struct ProHandClientHandle *handle);
  *
  * Finer-grained than `prohand_client_is_connected()`, which stays true for up
  * to 10 s after the driver goes silent — this is the value that watchdog reads.
- * Seeded at client creation, so it reports a fresh age before any status has
- * ever arrived; treat it as meaningful only once the first status has been
- * received.
+ * Writes `UINT64_MAX` when no status has arrived yet, matching the sentinel
+ * `prohand_get_system_status()` uses for the same condition. Previously this
+ * reported the client's own age, which was indistinguishable from a live
+ * driver.
  *
  * # Parameters
- * - `out_ms`: Written with the elapsed milliseconds on success
+ * - `out_ms`: Written with the elapsed milliseconds, or `UINT64_MAX` if none
+ * yet
  */
 enum ProHandResult
 prohand_ms_since_last_heartbeat(const struct ProHandClientHandle *handle,
@@ -782,17 +1042,21 @@ enum ProHandResult prohand_send_homing(const struct ProHandClientHandle *handle,
  * # Parameters
  * - `positions`: Array of 20 floats (5 fingers × 4 joints) in radians
  *   Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
- * - `torque`: Single torque value (normalized 0.0 to 1.0) applied to all joints
+ * - `torques`: Array of 20 floats (normalized 0.0 to 1.0), one per joint, in
+ *   the same order as `positions`. Pass the same value 20 times for a uniform
+ *   grip; the firmware applies each independently.
+ * - `velocity_saturation`: Global servo velocity cap, normalized 0.0 to 1.0.
+ *   `0.0` uses the firmware default; the cap is per-hand, not per-finger.
  *
  * # Returns
  * - ProHandResult::Success on success
- * - ProHandResult::ErrorNull if handle or positions is null
+ * - ProHandResult::ErrorNull if handle, positions, or torques is null
  * - ProHandResult::ErrorOther on other errors
  */
 enum ProHandResult
 prohand_send_hand_command(const struct ProHandClientHandle *handle,
-                          const float *positions, float torque,
-                          uint8_t velocity_saturation);
+                          const float *positions, const float *torques,
+                          float velocity_saturation);
 
 /**
  * Send hand command via PUB/SUB streaming channel (high-level joint angles,
@@ -808,19 +1072,23 @@ prohand_send_hand_command(const struct ProHandClientHandle *handle,
  * # Parameters
  * - `positions`: Array of 20 floats (5 fingers × 4 joints) in radians
  *   Order: thumb[0-3], index[4-7], middle[8-11], ring[12-15], pinky[16-19]
- * - `torque`: Single torque value (normalized 0.0 to 1.0) applied to all joints
+ * - `torques`: Array of 20 floats (normalized 0.0 to 1.0), one per joint, in
+ *   the same order as `positions`. Pass the same value 20 times for a uniform
+ *   grip; the firmware applies each independently.
+ * - `velocity_saturation`: Global servo velocity cap, normalized 0.0 to 1.0.
+ *   `0.0` uses the firmware default; the cap is per-hand, not per-finger.
  *
  * # Returns
  * - ProHandResult::Success on success
- * - ProHandResult::ErrorNull if handle or positions is null
+ * - ProHandResult::ErrorNull if handle, positions, or torques is null
  * - ProHandResult::ErrorNotConnected if streaming endpoint was not provided at
  * client creation
  * - ProHandResult::ErrorOther on other errors
  */
 enum ProHandResult
 prohand_send_hand_streams(const struct ProHandClientHandle *handle,
-                          const float *positions, float torque,
-                          uint8_t velocity_saturation);
+                          const float *positions, const float *torques,
+                          float velocity_saturation);
 
 /**
  * Send wrist command via REQ/REP command channel (wrist joint angles with
@@ -916,6 +1184,129 @@ enum ProHandResult
 prohand_set_wrist_limits(const struct ProHandClientHandle *handle,
                          const float *max_velocity,
                          const float *max_acceleration, const float *max_jerk);
+
+/**
+ * Per-subsystem thermal load, as a percentage of the rate at which firmware
+ * can publish thermal alerts.
+ *
+ * Firmware caps thermal alerts at one per subsystem per 5 s, so that ceiling
+ * is the denominator: a lone temperature excursion reads single digits, a
+ * genuinely hot actuator saturates the channel and reads 100. Prefer this over
+ * reacting to individual warnings — one warning carries no severity, a
+ * percentage does.
+ *
+ * Measured by the driver on its raw alert stream and republished on the
+ * filtered status channel, so the debouncing applied to that channel does not
+ * distort these numbers — and the counts span the driver's uptime, not just
+ * this client's connection.
+ *
+ * # Parameters
+ * - `out_loads`: caller-allocated array to fill
+ * - `max_loads`: capacity of `out_loads`
+ *
+ * # Returns
+ * - `>= 0`: number of subsystems written (quiet ones are omitted)
+ * - `ProHandResult::ErrorNull` if either argument is null/zero
+ */
+int prohand_get_thermal_load(const struct ProHandClientHandle *handle,
+                             struct ThermalLoad *out_loads, uint32_t max_loads);
+
+/**
+ * Worst subsystem's thermal load, ranked by lockdown then warning.
+ *
+ * The one-number readout: `warning_percent` and `lockdown_percent` on the
+ * hottest subsystem. See `prohand_get_thermal_load()` for what the scale means.
+ *
+ * # Returns
+ * - `1` when `out_load` was filled
+ * - `0` when nothing has alerted inside the window
+ * - `ProHandResult::ErrorNull` if either argument is null
+ */
+int prohand_get_worst_thermal_load(const struct ProHandClientHandle *handle,
+                                   struct ThermalLoad *out_load);
+
+/**
+ * Aggregate health of the connected hand in one passive read.
+ *
+ * Liveness, hand state, handedness, thermal load and alert rates together —
+ * the call to make when you want to know whether the hand is healthy, rather
+ * than reacting to individual alerts. A lone alert carries no severity; a rate
+ * and a latched lockdown state do.
+ *
+ * Assembled client-side from the driver's raw status stream. Nothing is added
+ * to the wire for it, and reading it never consumes a status message or sends
+ * a command, so it is safe to poll from a UI at frame rate.
+ *
+ * See `prohand_get_thermal_load()` for the per-subsystem breakdown behind
+ * `worst_*`, and the header's hand-state table for `hand_state`.
+ *
+ * # Returns
+ * - ProHandResult::Success on success
+ * - ProHandResult::ErrorNull if handle or out_status is null
+ */
+enum ProHandResult
+prohand_get_system_status(const struct ProHandClientHandle *handle,
+                          struct ProHandSystemStatus *out_status);
+
+/**
+ * Take the next qualified monitoring event, oldest first.
+ *
+ * Events run *beside* the status stream, not in front of it: nothing is
+ * filtered out of `prohand_try_recv_message()`, so a diagnostic tool still sees
+ * every alert first-hand. An event says a condition has been *established* — a
+ * thermal warning that persisted rather than a single noisy sample, or a
+ * lockdown — which is the thing worth reacting to. A lone alert cannot express
+ * that, which is how a stream of them came to read as a hardware fault.
+ *
+ * Poll until this returns 0 to drain the queue. Delivery is by polling rather
+ * than a callback on purpose: a callback would fire from the SDK's receiver
+ * thread, which for a managed-language wrapper means re-entering its runtime
+ * from a foreign thread.
+ *
+ * # Returns
+ * - `1` when `out_event` was filled
+ * - `0` when the queue is empty
+ * - `ProHandResult::ErrorNull` if either argument is null
+ */
+int prohand_poll_system_event(const struct ProHandClientHandle *handle,
+                              struct ProHandSystemEvent *out_event);
+
+/**
+ * Number of monitoring events discarded because the queue filled.
+ *
+ * The queue is bounded and drops oldest-first, so a consumer that stops polling
+ * costs a fixed amount of memory rather than growing without bound. A non-zero
+ * count here means this client is not polling often enough.
+ *
+ * # Returns
+ * - `>= 0`: events lost since the client was created
+ * - `ProHandResult::ErrorNull` if handle is null
+ */
+int prohand_dropped_event_count(const struct ProHandClientHandle *handle);
+
+/**
+ * Every alerting signal active inside the window, thermal or not.
+ *
+ * The per-signature breakdown behind `system_status().active_signals`: one row
+ * per unique `(source, severity, actuator, code)`, so a flapping servo error
+ * and a thermal warning on the same actuator are separate rows rather than
+ * pooled. `prohand_get_thermal_load()` is the thermal-only view of the same
+ * data, reassembled per subsystem.
+ *
+ * `rate_percent` is the fraction of the maximum rate firmware can publish for
+ * that signature — a lone excursion reads single digits, a persistent fault
+ * saturates at 100.
+ *
+ * # Parameters
+ * - `out_rates`: caller-allocated array to fill
+ * - `max_rates`: capacity of `out_rates`
+ *
+ * # Returns
+ * - `>= 0`: number of signals written (quiet ones are omitted)
+ * - `ProHandResult::ErrorNull` if either argument is null/zero
+ */
+int prohand_get_signal_rates(const struct ProHandClientHandle *handle,
+                             struct SignalRate *out_rates, uint32_t max_rates);
 
 /**
  * Receive the next status message (non-blocking).

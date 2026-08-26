@@ -109,6 +109,9 @@ int main() {
         std::vector<float> handPos(20, 0.0f);
         client.sendHandCommands(handPos, 0.45f);
 
+        // Per-finger torque: light thumb, firm index (thumb→pinky)
+        client.sendHandCommands(handPos, {0.2f, 0.6f, 0.45f, 0.45f, 0.45f});
+
     } catch (const SdkException& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
