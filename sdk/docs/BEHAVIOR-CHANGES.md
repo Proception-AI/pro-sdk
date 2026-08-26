@@ -66,6 +66,25 @@ was written by the parser but never by the encoder.
 `thermal_event` looked useless, `thermal_event` is now trustworthy and more
 specific.
 
+### Fixed: heartbeat age was seeded at client creation
+
+`prohand_ms_since_last_heartbeat()` started its clock when you constructed the
+client, not when the first status arrived. With no driver running it reported a
+small, steadily-growing age — indistinguishable from a healthy link. A watchdog
+comparing it against a threshold saw a live hand that was never there.
+
+It now writes `UINT64_MAX` until a status message actually arrives, the same
+sentinel `prohand_get_system_status()` uses for `ms_since_heartbeat`. The call
+still returns success, so nothing new to error-check.
+
+The socket connecting no longer counts as a heartbeat either: an `ipc://`
+subscribe succeeds even with no publisher on the other end, so it proved nothing.
+
+**What to do.** If you compare the value against a timeout, `UINT64_MAX` exceeds
+it and you will correctly treat the link as down. If you feed it to anything that
+would be surprised by a very large number — an average, a plot, a subtraction —
+special-case the sentinel.
+
 ### New: system status, signal rates and monitoring events
 
 A single thermal alert carries no severity. Firmware raises one the moment a

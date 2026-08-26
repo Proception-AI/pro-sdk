@@ -907,12 +907,14 @@ int prohand_client_is_connected(const struct ProHandClientHandle *handle);
  *
  * Finer-grained than `prohand_client_is_connected()`, which stays true for up
  * to 10 s after the driver goes silent — this is the value that watchdog reads.
- * Seeded at client creation, so it reports a fresh age before any status has
- * ever arrived; treat it as meaningful only once the first status has been
- * received.
+ * Writes `UINT64_MAX` when no status has arrived yet, matching the sentinel
+ * `prohand_get_system_status()` uses for the same condition. Previously this
+ * reported the client's own age, which was indistinguishable from a live
+ * driver.
  *
  * # Parameters
- * - `out_ms`: Written with the elapsed milliseconds on success
+ * - `out_ms`: Written with the elapsed milliseconds, or `UINT64_MAX` if none
+ * yet
  */
 enum ProHandResult
 prohand_ms_since_last_heartbeat(const struct ProHandClientHandle *handle,

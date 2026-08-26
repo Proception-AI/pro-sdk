@@ -2,7 +2,7 @@
 
 Version: 0.3.13.0
 Platform: linux-arm64
-Build Date: 2026-08-25 22:10:05 UTC
+Build Date: 2026-08-25 23:54:00 UTC
 
 ## Included Binaries
 

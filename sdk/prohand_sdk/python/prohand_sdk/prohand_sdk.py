@@ -1433,12 +1433,13 @@ class ProHandClient:
         10 seconds after the driver goes silent — this is the value that watchdog
         reads. Poll it to detect a stalled driver sooner.
 
-        The counter is seeded when the client is created, so it reports a small
-        age before any status has ever arrived. Treat the value as meaningful
-        only after the first successful try_recv_status().
+        Returns 2**64 - 1 until the first status actually arrives, the same
+        sentinel system_status().ms_since_heartbeat uses. It exceeds any timeout
+        you compare it against, so a watchdog correctly reads "down"; special-case
+        it before feeding the value to an average or a plot.
 
         Returns:
-            Age of the last status message in milliseconds
+            Age of the last status message in milliseconds, or 2**64 - 1 if none
 
         Example:
             if client.ms_since_last_heartbeat() > 500:
