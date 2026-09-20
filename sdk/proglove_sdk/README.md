@@ -6,6 +6,7 @@ Multi-language client bindings for ProGlove tactile sensor devices.
 
 - ✅ **Python** - Full support via ctypes
 - ✅ **C/C++** - Full support via direct FFI (cdylib)
+- ✅ **Android** - Read-only tactile and IMU over USB OTG, see [android/](android/)
 - ❌ **WebAssembly** - Not supported (requires OS-level networking)
 
 ## Directory Structure

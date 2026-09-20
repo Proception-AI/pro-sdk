@@ -18,12 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.3.13.0] - 2026-08-25
+## [0.3.17.0] - 2026-09-19
 
 ### Added
-- SDK version 0.3.13.0
-- Firmware version 0.9.1.0
-- macOS App version 0.3.13.0
+- SDK version 0.3.17.0
+- Firmware version 0.9.11.0
+- macOS App version 0.3.17.0
 
 ---
 
