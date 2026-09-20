@@ -68,10 +68,10 @@ pro-sdk/
 ├── docs/                  Shared documentation and assets
 ├── sdk/                   SDK source, libraries, demos, and docs
 │   ├── prohand_sdk/       ProHand SDK   (lib/, cpp/, python/)
-│   ├── proglove_sdk/      ProGlove SDK  (lib/, cpp/, python/)
+│   ├── proglove_sdk/      ProGlove SDK  (lib/, cpp/, python/, android/)
 │   ├── prowrist_sdk/      ProWristCam SDK (lib/, cpp/, python/)
-│   ├── demo/              Example applications (python/, cpp/)
-│   ├── docs/              API.md, EXAMPLES.md
+│   ├── demo/              Example applications (python/, cpp/, android/)
+│   ├── docs/              API.md, EXAMPLES.md, ANDROID.md
 │   └── README.md          SDK usage guide
 └── driver/                Headless IPC host binaries (unpacked, per platform)
     ├── macos-arm64/       macOS Apple Silicon
@@ -181,6 +181,27 @@ with WristCamClient("ipc:///tmp/prowristcam-stream.ipc") as cam:
     frame = cam.try_recv_frame()           # JPEG frame, non-blocking
 ```
 
+### 4. ProGlove on Android
+
+The glove also reads over USB OTG on Android, with no driver process. The app
+opens the USB device itself and the library decodes the bytes:
+
+```java
+GloveChannel glove = new GloveChannel(GloveSide.LEFT, new UsbGloveTransport(context));
+glove.open(0);                       // permission dialog, then the stream starts
+
+glove.poll(new GloveChannel.Listener() {
+    public void onTactile(int[] taxels, int uid, int timestampMs) { }
+    public void onImu(float[] quat, int timestampMs) { }
+});                                  // call from a timer; it also sends the heartbeat
+```
+
+Add `sdk/proglove_sdk/android/aar/proception-glove.aar` to your Gradle build, or
+link `jni/arm64-v8a/libglove_proto.so` against `include/glove_proto.h` from the
+NDK. Needs API 24+, an arm64 device and USB host support. See
+[ANDROID.md](sdk/docs/ANDROID.md) and the `sdk/demo/android/glove_viewer`
+example.
+
 ## SDK API at a glance
 
 ### ProHand (`ProHandClient`)
@@ -236,6 +257,7 @@ C++ equivalents are under `sdk/demo/cpp` (`just build`, then `just connect`,
 
 - [SDK usage guide](sdk/README.md)
 - [API reference](sdk/docs/API.md) · [Examples](sdk/docs/EXAMPLES.md)
+- [Android integration](sdk/docs/ANDROID.md)
 - [Demo walkthrough](sdk/demo/README.md)
 - [Release index](INDEX.md) · [Manifest](MANIFEST.txt) · [Changelog](CHANGELOG.md)
 
@@ -255,6 +277,7 @@ git checkout 0.3.17.0    # check out a specific release
 | macOS ARM64 (M-series) | ✓ | ✓ |
 | Linux ARM64 (Jetson) | ✓ | ✓ |
 | Linux x64 | ✓ | ✓ |
+| Android arm64 (API 24+) | ✓ ProGlove only | — in-process |
 | Windows x64 | ✗ | ✗ |
 
 ✗ Windows is not supported in the near term. Support may be considered upon
@@ -262,7 +285,7 @@ special request — contact contact@proception.ai.
 
 ## Support
 
-- **Issues**: https://github.com/proception/pro-sdk/issues
+- **Issues**: https://github.com/Proception-AI/pro-sdk/issues
 - **Email**: contact@proception.ai
 - **Contributing**: see [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Security**: see [SECURITY.md](SECURITY.md)

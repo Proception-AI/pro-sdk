@@ -67,7 +67,7 @@ Since the SDK is unpacked, you can use it directly:
 
 # Clone the repository
 
-git clone https://github.com/proception/pro-sdk.git
+git clone https://github.com/Proception-AI/pro-sdk.git
 cd pro-sdk
 
 # Use Python SDK
@@ -117,5 +117,5 @@ See [MANIFEST.txt](MANIFEST.txt) for checksums and detailed file information.
 For documentation and support:
 
 - SDK Documentation: See `sdk/docs/`
-- Issues: https://github.com/proception/pro-sdk/issues
+- Issues: https://github.com/Proception-AI/pro-sdk/issues
 - Email: contact@proception.ai
