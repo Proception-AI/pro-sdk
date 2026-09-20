@@ -20,6 +20,7 @@ sdk/
 │   ├── lib/                # Pre-built native libraries
 │   ├── cpp/                # C++ headers and bindings
 │   ├── python/             # Python bindings
+│   ├── android/            # Android (arm64): AAR, C header, native library
 │   └── README.md
 ├── prowrist_sdk/           # ProWristCam SDK
 │   ├── lib/                # Pre-built native libraries
