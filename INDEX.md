@@ -1,7 +1,7 @@
 # ProHand SDK Release Index
 
 **Current Release**: 0.3.17.0
-**Release Date**: 2026-09-19
+**Release Date**: 2026-09-22
 
 ## Version Information
 

@@ -2,7 +2,7 @@
 
 Version: 0.3.17.0
 Platform: macos-arm64
-Build Date: 2026-09-20 03:41:23 UTC
+Build Date: 2026-09-22 21:25:14 UTC
 
 ## Included Binaries
 

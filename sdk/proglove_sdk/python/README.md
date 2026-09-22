@@ -122,7 +122,8 @@ class TactileStatus:
     lower_palm: List[int]   # 16 taxels
 ```
 
-Total: 100 taxels per hand. Values are 0-255, where higher values indicate more pressure.
+Total: 100 taxels per hand. Values are 0-4095 (12-bit ADC), where higher values indicate more pressure.
+The default stream is baseline-subtracted with a deadzone, so an unloaded taxel reads 0.
 
 #### `UsbDevice`
 
